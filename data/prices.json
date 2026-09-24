@@ -2,9 +2,59 @@
   "schema": 1,
   "asOf": "2026-09-24",
   "models": {
-    "gpt-6-sol": {"input":"2","cached":"0.2","write":"2.5","output":"10","source":"https://developers.openai.com/api/docs/models/gpt-6-sol"},
-    "gpt-5.6-sol": {"input":"4","cached":"0.4","write":"5","output":"20","threshold":272000,"inputMultiplier":"2","outputMultiplier":"1.5","expires":"2026-11-21T23:59:59Z","source":"https://developers.openai.com/api/docs/models/gpt-5.6-sol"},
-    "gpt-5.6-terra": {"input":"2","cached":"0.2","write":"2.5","output":"12","threshold":272000,"inputMultiplier":"2","outputMultiplier":"1.5","source":"https://developers.openai.com/api/docs/models/gpt-5.6-terra"}
+    "gpt-6-sol": {
+      "input": "2",
+      "cached": "0.2",
+      "write": "2.5",
+      "output": "10",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-sol",
+      "threshold": 272000,
+      "inputMultiplier": "2",
+      "outputMultiplier": "1.5"
+    },
+    "gpt-5.6-sol": {
+      "input": "4",
+      "cached": "0.4",
+      "write": "5",
+      "output": "20",
+      "threshold": 272000,
+      "inputMultiplier": "2",
+      "outputMultiplier": "1.5",
+      "expires": "2026-11-21T23:59:59Z",
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    "gpt-5.6-terra": {
+      "input": "2",
+      "cached": "0.2",
+      "write": "2.5",
+      "output": "12",
+      "threshold": 272000,
+      "inputMultiplier": "2",
+      "outputMultiplier": "1.5",
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+    },
+    "gpt-6-astra": {
+      "input": "10",
+      "cached": "1",
+      "write": "12.5",
+      "output": "50",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "threshold": 272000,
+      "inputMultiplier": "2",
+      "outputMultiplier": "1.5"
+    },
+    "gpt-6-luna": {
+      "input": "0.1",
+      "cached": "0.01",
+      "write": "0.125",
+      "output": "0.5",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "threshold": 272000,
+      "inputMultiplier": "2",
+      "outputMultiplier": "1.5"
+    }
   },
-  "aliases": {"gpt-5.6":"gpt-5.6-sol"}
+  "aliases": {
+    "gpt-5.6": "gpt-5.6-sol"
+  }
 }

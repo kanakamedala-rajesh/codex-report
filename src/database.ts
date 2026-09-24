@@ -77,6 +77,7 @@ export class Store {
         const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version ?? 0);
         if (version !== 0 && version !== 1) throw new Error('Unsupported ledger schema.');
         this.db.exec(SCHEMA); this.db.exec('PRAGMA user_version=1;');
+        if (process.platform !== 'win32') fs.chmodSync(path.join(home, 'usage.sqlite3'), 0o600);
         this.db.prepare("INSERT OR IGNORE INTO meta VALUES('revision','0')").run();
       }
     } catch (e) { this.lease?.close(); throw e; }
@@ -93,9 +94,9 @@ export class Store {
     for (const t of batch.threads) this.db.prepare('INSERT OR IGNORE INTO threads VALUES(?,?,?,?,?)').run(t.id, t.parent, t.root, t.kind, t.started);
     for (const t of batch.turns) this.putTurn(t);
     for (const s of batch.samples) {
-      const exists = this.db.prepare('SELECT id,input,output,thread,turn FROM samples WHERE id=?').get(s.id);
+      const exists = this.db.prepare('SELECT * FROM samples WHERE id=?').get(s.id);
       if (exists) {
-        if (exists.input !== s.input || exists.output !== s.output || exists.thread !== s.thread || exists.turn !== s.turn)
+        if (['input','cached','write','output','reasoning','thread','turn','rootThread','rootTurn'].some(k=>exists[k]!==s[k as keyof Sample]))
           this.addIssue(s.thread, 'conflicting_request_identity', s.at);
         continue;
       }
