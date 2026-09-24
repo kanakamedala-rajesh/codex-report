@@ -6,6 +6,7 @@ import { Worker } from 'node:worker_threads';
 import { spawn } from 'node:child_process';
 import { loadConfig, Config } from './config';
 import { object, readJson, writeJson, safeEqual, message } from './util';
+import { VERSION } from './version';
 export interface Runtime {
   pid: number;
   port: number;
@@ -236,7 +237,7 @@ export async function startService(home: string, open = false): Promise<Service>
           json(res, 200, {
             ...state,
             startedAt: started,
-            version: '0.0.1-dev',
+            version: VERSION,
             accounts: [
               ...(Array.isArray(state.accounts) ? state.accounts : []),
               'all',

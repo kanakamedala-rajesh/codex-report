@@ -1,8 +1,10 @@
 # Phase status - v0.0.1-dev
 
-This repository was initialized independently on main. The implementation plan
-was the first commit. Subsequent work packages have detailed local commit bodies.
-No remote is configured, and no predecessor code or database is required.
+This repository was initialized independently on `main`. The implementation
+plan was the first commit. Subsequent work packages have detailed commit bodies.
+No Git remote is configured in this checkout; the intended publication target
+is `https://github.com/kanakamedala-rajesh/codex-report`. No predecessor code or
+database is required.
 
 | Phase                      | Implementation                  | Verification                                                                                                                            |
 | -------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |

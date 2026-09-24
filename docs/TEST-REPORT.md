@@ -4,6 +4,11 @@ Build date: September 24, 2026. This is an implemented development application,
 not a production certification or a claim of identical behavior on untested
 runtimes. All mutations in these checks used disposable local homes.
 
+This is a historical snapshot of the validation run on that date. The release
+preparation changes made later are not covered by these results; see
+[`PUBLISHING.md`](PUBLISHING.md) for the current release gates. The reproduction
+commands below use the repository's current pnpm workflow.
+
 ## Executed environment
 
 Linux x64, Node 22.16.0, npm 10.9.2, TypeScript 5.8.3, Git 2.47.3.
@@ -59,22 +64,22 @@ or executed here.
 
 ## Blocked and not-run gates
 
-| Gate                    | Status                                                                                                                                                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ESLint                  | **BLOCKED:** declared and configured, but unavailable locally; npm run lint exited 127 with eslint: not found. It was not silently skipped by verify.                                                         |
-| Dependency audit        | **BLOCKED:** registry resolution unavailable and no resolved lockfile exists. Offline audit returned ENOLOCK, not a clean audit.                                                                              |
-| Node 18.20.8            | **NOT RUN:** runtime acquisition unavailable. The engines declaration is a compatibility target, not proof.                                                                                                   |
-| Actual libsql backend   | **NOT RUN:** source contract reviewed, including its ignored readonly option and unimplemented backup method; adapter uses query_only and SQL VACUUM INTO. Exact native package still needs target execution. |
-| Windows, macOS, ARM64   | **NOT RUN:** source/configuration and cross-built decoders are provided; no native runtime pass claimed.                                                                                                      |
-| Live Codex UI/trust     | **NOT RUN:** no authenticated interactive Codex process or user hook-trust action was exercised. Fixtures validate the handler contract.                                                                      |
-| CI matrix               | **NOT RUN:** workflow provided, not pushed or executed.                                                                                                                                                       |
-| Public registry release | **NOT DONE:** no npm publication, remote repository, push or external account mutation.                                                                                                                       |
+| Gate                    | Status                                                                                                                                                                                                                                                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ESLint                  | **BLOCKED:** declared and configured, but unavailable locally; npm run lint exited 127 with eslint: not found. It was not silently skipped by verify.                                                                                                      |
+| Dependency audit        | **BLOCKED at report time:** registry resolution was unavailable and no resolved lockfile existed then. Offline audit returned ENOLOCK, not a clean audit. A pnpm lockfile is present now, but the audit has not been rerun as part of release preparation. |
+| Node 18.20.8            | **NOT RUN:** runtime acquisition unavailable. The engines declaration is a compatibility target, not proof.                                                                                                                                                |
+| Actual libsql backend   | **NOT RUN:** source contract reviewed, including its ignored readonly option and unimplemented backup method; adapter uses query_only and SQL VACUUM INTO. Exact native package still needs target execution.                                              |
+| Windows, macOS, ARM64   | **NOT RUN:** source/configuration and cross-built decoders are provided; no native runtime pass claimed.                                                                                                                                                   |
+| Live Codex UI/trust     | **NOT RUN:** no authenticated interactive Codex process or user hook-trust action was exercised. Fixtures validate the handler contract.                                                                                                                   |
+| CI matrix               | **NOT RUN:** workflow provided, not pushed or executed.                                                                                                                                                                                                    |
+| Public registry release | **NOT DONE:** no npm publication, remote repository, push or external account mutation.                                                                                                                                                                    |
 
-Direct dependency versions are pinned. No lockfile was fabricated when registry
-resolution failed. On an online development machine, resolve and review the
-lockfile, execute npm run verify and the Node 18/libsql matrix before claiming
-all release gates pass. The complete verify command is intentionally red when
-its lint dependency is absent.
+Direct dependency versions are pinned. The pnpm lockfile was added after this
+report's validation run. On an online development machine, review the lockfile,
+execute `pnpm run verify` and the Node 18/libsql matrix before claiming all
+release gates pass. The complete verify command is intentionally red when its
+lint dependency is absent.
 
 ## Source replay totals
 
@@ -92,23 +97,24 @@ repository retains aggregate evidence and synthetic structural tests only.
 ## Reproduce
 
 ```sh
-npm install --ignore-scripts
-npm run format:check
-npm run lint
-npm run type-check
-npm test
-npm run test:coverage
-npm run test:package
-npm run check:package
-npm run verify
-npm run audit:dependencies
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run format:check
+pnpm run lint
+pnpm run type-check
+pnpm run test
+pnpm run test:coverage
+pnpm run test:package
+pnpm run check:package
+pnpm run verify
+pnpm run audit:dependencies
 ```
 
 For the exact minimum backend gate, run the packed install and self-test with
-Node 18.20.8 and CODEX_REPORT_SQLITE_BACKEND=libsql in the environment. For browser
-QA install the declared Playwright package and a permitted Chromium executable,
-then run npm run test:browser. CODEX_REPORT_BROWSER_FIXTURE=1 is the explicitly
-separate offline DOM mode, not a way to assert a blocked live navigation passed.
+Node 18.20.8 and `CODEX_REPORT_SQLITE_BACKEND=libsql` in the environment. For
+browser QA install the declared Playwright package and a permitted Chromium
+executable, then run `pnpm run test:browser`. `CODEX_REPORT_BROWSER_FIXTURE=1`
+is the explicitly separate offline DOM mode, not a way to assert a blocked live
+navigation passed.
 
 On a target device: install the packed application, init, doctor, self-test,
 sync, start --open, review the managed hooks in Codex, complete a turn, cancel

@@ -42,6 +42,8 @@ change Codex security settings, start a system service, or publish anything.
 
 ## Disclosure
 
-This development package has no public security reporting endpoint yet. Keep
-sensitive logs and access tokens out of public issues. Use minimized synthetic
-reproductions when reporting a defect.
+Follow the private disclosure instructions in the repository's root
+[`SECURITY.md`](../SECURITY.md). GitHub Private Vulnerability Reporting must be
+enabled by the repository owner before the repository is made public. Keep
+sensitive logs and access tokens out of public issues; use minimized synthetic
+reproductions for ordinary defects.

@@ -5,6 +5,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { spawnSync, spawn } = require('node:child_process');
 const { packProject, runNpm } = require('./npm-tools.cjs');
+const { name: packageName, version: expectedVersion } = require('../package.json');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-report-packed-'));
 let service;
 function run(args, options = {}) {
@@ -33,7 +34,7 @@ async function main() {
     prefix,
     ...(process.platform === 'win32' ? [] : ['lib']),
     'node_modules',
-    'codex-report',
+    ...packageName.split('/'),
   );
   const entry = path.join(packageRoot, 'dist', 'cli.js');
   const home = path.join(temp, 'private store'),
@@ -47,7 +48,7 @@ async function main() {
   );
   const command = (args, input) =>
     run([entry, '--home', home, ...args], input === undefined ? {} : { input });
-  assert.equal(command(['--version']).trim(), '0.0.1-dev');
+  assert.equal(command(['--version']).trim(), expectedVersion);
   const shim = path.join(
     prefix,
     process.platform === 'win32' ? 'codex-report.cmd' : 'bin/codex-report',
@@ -67,7 +68,7 @@ async function main() {
     assert.equal(r.status, 0, r.stderr);
     version = r.stdout;
   }
-  assert.equal(version.trim(), '0.0.1-dev');
+  assert.equal(version.trim(), expectedVersion);
   command(['init', '--codex-home', codex]);
   command(['init', '--codex-home', codex]);
   assert.equal(JSON.parse(command(['doctor'])).hooks.length, 4);

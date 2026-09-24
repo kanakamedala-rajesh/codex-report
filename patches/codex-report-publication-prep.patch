@@ -1,0 +1,772 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index da823f2..ec1d018 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -13,10 +13,10 @@ jobs:
+         node: ['18.20.8', '22', '24']
+     runs-on: ${{ matrix.os }}
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+         with:
+           persist-credentials: false
+-      - uses: actions/setup-node@v4
++      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+           node-version: ${{ matrix.node }}
+       - run: npm install --global pnpm@10.11.0 --ignore-scripts --no-audit --no-fund
+@@ -34,10 +34,10 @@ jobs:
+     name: Live dashboard browser test
+     runs-on: ubuntu-22.04
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+         with:
+           persist-credentials: false
+-      - uses: actions/setup-node@v4
++      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+           node-version: '24'
+       - run: npm install --global pnpm@10.11.0 --ignore-scripts --no-audit --no-fund
+diff --git a/.gitignore b/.gitignore
+index e30e6ac..fdd131b 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -5,4 +5,11 @@ coverage/
+ *.sqlite3*
+ *.crx
+ .env
++.env.*
++!.env.example
++!.env.template
++/.npmrc
++.pnpm-store/
++npm-debug.log*
++pnpm-debug.log*
+ .DS_Store
+diff --git a/README.md b/README.md
+index 68d00c9..2f0d322 100644
+--- a/README.md
++++ b/README.md
+@@ -1,23 +1,38 @@
+-# Codex Report v0.0.1-dev
++# Codex Report
+ 
+-A fresh, standalone npm application for local Codex usage reporting. It includes
+-real initialization, persistent accounting, readable turn/interruption reports,
+-an explicit foreground collector, and a live browser dashboard. No previous
+-application, migration, Python installation, API key, or paid API call is required.
++Codex Report is a local-first CLI and dashboard for accounting and reports from
++Codex sessions. It includes persistent usage accounting, turn and interruption
++reports, an explicit foreground collector, and a live browser dashboard. It does
++not require a Python installation, API key, or paid API call.
+ 
+-**This is a development release.** The application is implemented and exercised
+-on Linux x64 / Node 22.16.0. Windows, macOS, ARM64 and the exact Node 18.20.8
+-runtime are target platforms, not claimed runtime passes in this build. See
+-[verification](docs/TEST-REPORT.md) for the executed evidence and open gates.
++**Status:** Development prerelease. Version `0.0.1-dev` has not been published
++to npm. This application has been exercised on Linux x64 / Node 22.16.0;
++Windows, macOS, ARM64, Node 18.20.8 and the CI matrix remain unverified here. See
++the [validation report](docs/TEST-REPORT.md) for recorded checks and open gates.
+ 
+-## Install the packed application
++## Project origin and AI use
+ 
+-Download the actual `codex-report-0.0.1-dev.tgz` supplied with this release. Do not
+-install an unrelated package by guessing the public registry name: this project
+-has not been published to npm.
++The initial implementation was built in a ChatGPT conversation using GPT-6-PRO.
++The project is maintained by [kanakamedala-rajesh](https://github.com/kanakamedala-rajesh).
++The Git author label `GPT-6-PRO (ChatGPT)` records that code-generation origin;
++it is not an OpenAI account or an endorsement. Codex Report is an independent
++project and is not an official OpenAI product.
++
++Conversation-generated patch files are kept in [`patches/`](patches/README.md)
++when supplied. They are historical diffs; the current source tree is canonical.
++
++## Install this development build
++
++The package is not available from the public npm registry yet. From a local
++checkout, build and create the tarball, then install that local file:
++
++The package name is `@venkatasudhalabs/codex-report`; its installed command
++remains `codex-report`.
+ 
+ ```sh
+-npm install -g --ignore-scripts ./codex-report-0.0.1-dev.tgz
++pnpm install --ignore-scripts
++pnpm run pack:local
++npm install -g --ignore-scripts ./venkatasudhalabs-codex-report-0.0.1-dev.tgz
+ codex-report --version
+ codex-report init
+ codex-report doctor
+@@ -26,9 +41,9 @@ codex-report sync
+ codex-report start --open
+ ```
+ 
+-The expected version is `0.0.1-dev`. These commands work with the normal npm
+-command launcher; there is no separate Python or shell installer. On Windows,
+-run them in PowerShell. Install separately inside each WSL distribution.
++The expected version is `0.0.1-dev`. The tarball filename contains the version
++from `package.json`. On Windows, run these commands in PowerShell. Install
++separately inside each WSL distribution.
+ 
+ **Node requirement:** 18.20.8 or newer. On Node 18/20 the optional `libsql@0.5.29`
+ prebuilt database dependency is required; do **not** install with `--omit=optional`
+@@ -300,8 +315,9 @@ are deduplicated across imports; ambiguous legacy identities have narrower
+ coverage. Conflicting usage preserves local values and is reported.
+ 
+ `uninstall-hooks` removes only the exact managed hook definitions, preserving
+-unrelated hooks and all stored data. Then `npm uninstall -g codex-report` removes
+-the application. Private data removal remains a deliberate filesystem operation.
++unrelated hooks and all stored data. Then
++`npm uninstall -g @venkatasudhalabs/codex-report` removes the application.
++Private data removal remains a deliberate filesystem operation.
+ 
+ ## Development and quality checks
+ 
+@@ -315,15 +331,16 @@ archive in the repository root, run:
+ pnpm run pack:local
+ ```
+ 
+-The result is `codex-report-0.0.1-dev.tgz`. Nothing is published and nothing is
+-installed by this command. A later run replaces that generated tarball.
++The result is `venkatasudhalabs-codex-report-0.0.1-dev.tgz`. Nothing is published
++and nothing is installed by this command. A later run replaces that generated
++tarball.
+ `test:package`, in contrast, packs into a temporary directory, tests an isolated
+ installation, and removes that temporary directory afterwards.
+ 
+ To test/install your freshly built tarball on this machine:
+ 
+ ```sh
+-npm install -g --ignore-scripts ./codex-report-0.0.1-dev.tgz
++npm install -g --ignore-scripts ./venkatasudhalabs-codex-report-0.0.1-dev.tgz
+ codex-report --version
+ codex-report doctor
+ ```
+@@ -348,8 +365,8 @@ does not install Chromium. Install the matching browser once and repeat this
+ step after changing the Playwright version:
+ 
+ ```sh
+-pnpm browser:install
+-pnpm test:browser
++pnpm run browser:install
++pnpm run test:browser
+ ```
+ 
+ `browser:install` runs the installed `playwright-core install chromium` CLI, not
+@@ -388,16 +405,16 @@ after the explicit browser setup above.
+ 
+ ```sh
+ pnpm install --ignore-scripts
+-pnpm format
+-pnpm format:check
+-pnpm  lint
+-pnpm type-check
+-pnpm test
+-pnpm test:coverage
+-pnpm test:package
+-pnpm check:package
+-pnpm verify
+-pnpm audit:dependencies
++pnpm run format
++pnpm run format:check
++pnpm run lint
++pnpm run type-check
++pnpm run test
++pnpm run test:coverage
++pnpm run test:package
++pnpm run check:package
++pnpm run verify
++pnpm run audit:dependencies
+ ```
+ 
+ TypeScript strict mode covers server code; a separate checked-JavaScript project
+@@ -405,7 +422,8 @@ covers the browser against shared backend types. Prettier is pinned. ESLint
+ includes TypeScript recommended and floating-promise checks. The complete verify
+ command fails if a required tool is missing: it does not silently skip linting.
+ 
+-The build container could not resolve the npm registry. It used the available
++The validation report is a historical snapshot from September 24, 2026. The
++build container could not resolve the npm registry. It used the available
+ TypeScript compiler and an integrity-checked official Prettier 3.9.9 build.
+ ESLint, dependency audit, the libsql runtime and exact Node 18 execution could not
+ be exercised there. Direct versions are pinned, and the pnpm lockfile records the
+@@ -422,10 +440,13 @@ build-time** requirement only:
+ ```sh
+ node tools/build-native.cjs
+ pnpm build
+-pnpm pack:local
++pnpm run pack:local
+ ```
+ 
+ The runtime executable sources and BSD license are included. Go 1.23.2 was the
+ available build toolchain; this is provenance, not a claim of current toolchain
+ security maintenance. See [architecture](docs/ARCHITECTURE.md),
+-[security](docs/SECURITY.md), and [phase plan](docs/IMPLEMENTATION-PLAN.md).
++[security](docs/SECURITY.md), [contributing](CONTRIBUTING.md),
++[publishing](docs/PUBLISHING.md), [changelog](CHANGELOG.md), and the
++[implementation plan](docs/IMPLEMENTATION-PLAN.md). The package is licensed
++under [MIT](LICENSE); please report vulnerabilities using [SECURITY.md](SECURITY.md).
+diff --git a/docs/PHASE-STATUS.md b/docs/PHASE-STATUS.md
+index e4ab50d..39b2f89 100644
+--- a/docs/PHASE-STATUS.md
++++ b/docs/PHASE-STATUS.md
+@@ -1,8 +1,10 @@
+ # Phase status - v0.0.1-dev
+ 
+-This repository was initialized independently on main. The implementation plan
+-was the first commit. Subsequent work packages have detailed local commit bodies.
+-No remote is configured, and no predecessor code or database is required.
++This repository was initialized independently on `main`. The implementation
++plan was the first commit. Subsequent work packages have detailed commit bodies.
++No Git remote is configured in this checkout; the intended publication target
++is `https://github.com/kanakamedala-rajesh/codex-report`. No predecessor code or
++database is required.
+ 
+ | Phase                      | Implementation                  | Verification                                                                                                                            |
+ | -------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+diff --git a/docs/SECURITY.md b/docs/SECURITY.md
+index 74f6fdb..a938107 100644
+--- a/docs/SECURITY.md
++++ b/docs/SECURITY.md
+@@ -42,6 +42,8 @@ change Codex security settings, start a system service, or publish anything.
+ 
+ ## Disclosure
+ 
+-This development package has no public security reporting endpoint yet. Keep
+-sensitive logs and access tokens out of public issues. Use minimized synthetic
+-reproductions when reporting a defect.
++Follow the private disclosure instructions in the repository's root
++[`SECURITY.md`](../SECURITY.md). GitHub Private Vulnerability Reporting must be
++enabled by the repository owner before the repository is made public. Keep
++sensitive logs and access tokens out of public issues; use minimized synthetic
++reproductions for ordinary defects.
+diff --git a/docs/TEST-REPORT.md b/docs/TEST-REPORT.md
+index 9756f77..d95fcdf 100644
+--- a/docs/TEST-REPORT.md
++++ b/docs/TEST-REPORT.md
+@@ -4,6 +4,11 @@ Build date: September 24, 2026. This is an implemented development application,
+ not a production certification or a claim of identical behavior on untested
+ runtimes. All mutations in these checks used disposable local homes.
+ 
++This is a historical snapshot of the validation run on that date. The release
++preparation changes made later are not covered by these results; see
++[`PUBLISHING.md`](PUBLISHING.md) for the current release gates. The reproduction
++commands below use the repository's current pnpm workflow.
++
+ ## Executed environment
+ 
+ Linux x64, Node 22.16.0, npm 10.9.2, TypeScript 5.8.3, Git 2.47.3.
+@@ -59,22 +64,22 @@ or executed here.
+ 
+ ## Blocked and not-run gates
+ 
+-| Gate                    | Status                                                                                                                                                                                                        |
+-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+-| ESLint                  | **BLOCKED:** declared and configured, but unavailable locally; npm run lint exited 127 with eslint: not found. It was not silently skipped by verify.                                                         |
+-| Dependency audit        | **BLOCKED:** registry resolution unavailable and no resolved lockfile exists. Offline audit returned ENOLOCK, not a clean audit.                                                                              |
+-| Node 18.20.8            | **NOT RUN:** runtime acquisition unavailable. The engines declaration is a compatibility target, not proof.                                                                                                   |
+-| Actual libsql backend   | **NOT RUN:** source contract reviewed, including its ignored readonly option and unimplemented backup method; adapter uses query_only and SQL VACUUM INTO. Exact native package still needs target execution. |
+-| Windows, macOS, ARM64   | **NOT RUN:** source/configuration and cross-built decoders are provided; no native runtime pass claimed.                                                                                                      |
+-| Live Codex UI/trust     | **NOT RUN:** no authenticated interactive Codex process or user hook-trust action was exercised. Fixtures validate the handler contract.                                                                      |
+-| CI matrix               | **NOT RUN:** workflow provided, not pushed or executed.                                                                                                                                                       |
+-| Public registry release | **NOT DONE:** no npm publication, remote repository, push or external account mutation.                                                                                                                       |
+-
+-Direct dependency versions are pinned. No lockfile was fabricated when registry
+-resolution failed. On an online development machine, resolve and review the
+-lockfile, execute npm run verify and the Node 18/libsql matrix before claiming
+-all release gates pass. The complete verify command is intentionally red when
+-its lint dependency is absent.
++| Gate                    | Status                                                                                                                                                                                                                                                     |
++| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| ESLint                  | **BLOCKED:** declared and configured, but unavailable locally; npm run lint exited 127 with eslint: not found. It was not silently skipped by verify.                                                                                                      |
++| Dependency audit        | **BLOCKED at report time:** registry resolution was unavailable and no resolved lockfile existed then. Offline audit returned ENOLOCK, not a clean audit. A pnpm lockfile is present now, but the audit has not been rerun as part of release preparation. |
++| Node 18.20.8            | **NOT RUN:** runtime acquisition unavailable. The engines declaration is a compatibility target, not proof.                                                                                                                                                |
++| Actual libsql backend   | **NOT RUN:** source contract reviewed, including its ignored readonly option and unimplemented backup method; adapter uses query_only and SQL VACUUM INTO. Exact native package still needs target execution.                                              |
++| Windows, macOS, ARM64   | **NOT RUN:** source/configuration and cross-built decoders are provided; no native runtime pass claimed.                                                                                                                                                   |
++| Live Codex UI/trust     | **NOT RUN:** no authenticated interactive Codex process or user hook-trust action was exercised. Fixtures validate the handler contract.                                                                                                                   |
++| CI matrix               | **NOT RUN:** workflow provided, not pushed or executed.                                                                                                                                                                                                    |
++| Public registry release | **NOT DONE:** no npm publication, remote repository, push or external account mutation.                                                                                                                                                                    |
++
++Direct dependency versions are pinned. The pnpm lockfile was added after this
++report's validation run. On an online development machine, review the lockfile,
++execute `pnpm run verify` and the Node 18/libsql matrix before claiming all
++release gates pass. The complete verify command is intentionally red when its
++lint dependency is absent.
+ 
+ ## Source replay totals
+ 
+@@ -92,23 +97,24 @@ repository retains aggregate evidence and synthetic structural tests only.
+ ## Reproduce
+ 
+ ```sh
+-npm install --ignore-scripts
+-npm run format:check
+-npm run lint
+-npm run type-check
+-npm test
+-npm run test:coverage
+-npm run test:package
+-npm run check:package
+-npm run verify
+-npm run audit:dependencies
++pnpm install --frozen-lockfile --ignore-scripts
++pnpm run format:check
++pnpm run lint
++pnpm run type-check
++pnpm run test
++pnpm run test:coverage
++pnpm run test:package
++pnpm run check:package
++pnpm run verify
++pnpm run audit:dependencies
+ ```
+ 
+ For the exact minimum backend gate, run the packed install and self-test with
+-Node 18.20.8 and CODEX_REPORT_SQLITE_BACKEND=libsql in the environment. For browser
+-QA install the declared Playwright package and a permitted Chromium executable,
+-then run npm run test:browser. CODEX_REPORT_BROWSER_FIXTURE=1 is the explicitly
+-separate offline DOM mode, not a way to assert a blocked live navigation passed.
++Node 18.20.8 and `CODEX_REPORT_SQLITE_BACKEND=libsql` in the environment. For
++browser QA install the declared Playwright package and a permitted Chromium
++executable, then run `pnpm run test:browser`. `CODEX_REPORT_BROWSER_FIXTURE=1`
++is the explicitly separate offline DOM mode, not a way to assert a blocked live
++navigation passed.
+ 
+ On a target device: install the packed application, init, doctor, self-test,
+ sync, start --open, review the managed hooks in Codex, complete a turn, cancel
+diff --git a/package.json b/package.json
+index af7ddaf..861b324 100644
+--- a/package.json
++++ b/package.json
+@@ -1,7 +1,33 @@
+ {
+-  "name": "codex-report",
++  "name": "@venkatasudhalabs/codex-report",
+   "version": "0.0.1-dev",
+   "description": "Local Codex usage accounting, readable turn reports and a live dashboard",
++  "packageManager": "pnpm@10.11.0",
++  "author": {
++    "name": "kanakamedala-rajesh",
++    "url": "https://github.com/kanakamedala-rajesh"
++  },
++  "homepage": "https://github.com/kanakamedala-rajesh/codex-report#readme",
++  "repository": {
++    "type": "git",
++    "url": "https://github.com/kanakamedala-rajesh/codex-report.git"
++  },
++  "publishConfig": {
++    "access": "public"
++  },
++  "bugs": {
++    "url": "https://github.com/kanakamedala-rajesh/codex-report/issues"
++  },
++  "keywords": [
++    "codex",
++    "openai",
++    "token-usage",
++    "usage-analytics",
++    "sqlite",
++    "dashboard",
++    "codex-cli",
++    "local-first"
++  ],
+   "license": "MIT",
+   "type": "commonjs",
+   "bin": {
+@@ -16,6 +42,7 @@
+     "data",
+     "README.md",
+     "LICENSE",
++    "SECURITY.md",
+     "docs/SECURITY.md",
+     "runtime",
+     "docs/TEST-REPORT.md",
+diff --git a/public/index.html b/public/index.html
+index 253a8bc..e6944a3 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -24,7 +24,7 @@
+       <div class="sidebar-foot">
+         <span class="dot"></span>Local to this device
+         <p>No prompts. No telemetry.<br />No provider API calls.</p>
+-        <small>v0.0.1-dev</small>
++        <small>Local and private</small>
+       </div>
+     </aside>
+     <main id="main">
+diff --git a/src/service.ts b/src/service.ts
+index 8a9c795..318dc76 100644
+--- a/src/service.ts
++++ b/src/service.ts
+@@ -6,6 +6,7 @@ import { Worker } from 'node:worker_threads';
+ import { spawn } from 'node:child_process';
+ import { loadConfig, Config } from './config';
+ import { object, readJson, writeJson, safeEqual, message } from './util';
++import { VERSION } from './version';
+ export interface Runtime {
+   pid: number;
+   port: number;
+@@ -236,7 +237,7 @@ export async function startService(home: string, open = false): Promise<Service>
+           json(res, 200, {
+             ...state,
+             startedAt: started,
+-            version: '0.0.1-dev',
++            version: VERSION,
+             accounts: [
+               ...(Array.isArray(state.accounts) ? state.accounts : []),
+               'all',
+diff --git a/src/version.ts b/src/version.ts
+index 79492bc..c383e08 100644
+--- a/src/version.ts
++++ b/src/version.ts
+@@ -1,4 +1,7 @@
+-export const VERSION = '0.0.1-dev';
++import { createRequire } from 'node:module';
++
++const packageMetadata: { version: string } = createRequire(__filename)('../package.json');
++export const VERSION = packageMetadata.version;
+ export const MINIMUM_NODE = '18.20.8';
+ export function assertRuntime(version = process.versions.node): void {
+   const [major = 0, minor = 0, patch = 0] = version.split('.').map(Number);
+diff --git a/tools/check-package.cjs b/tools/check-package.cjs
+index 8bc4662..9bbb01c 100644
+--- a/tools/check-package.cjs
++++ b/tools/check-package.cjs
+@@ -4,8 +4,13 @@ const path = require('node:path');
+ const crypto = require('node:crypto');
+ const assert = require('node:assert/strict');
+ const p = require('../package.json');
+-assert.equal(p.name, 'codex-report');
+-assert.equal(p.version, '0.0.1-dev');
++assert.equal(p.name, '@venkatasudhalabs/codex-report');
++assert.equal(p.publishConfig.access, 'public');
++assert.match(
++  p.version,
++  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
++  'Package version must be valid SemVer',
++);
+ assert.equal(p.bin['codex-report'], 'dist/cli.js');
+ assert.ok(
+   !p.scripts.install && !p.scripts.postinstall && !p.scripts.prepare,
+@@ -19,6 +24,7 @@ for (const f of [
+   'public/style.css',
+   'data/prices.json',
+   'README.md',
++  'SECURITY.md',
+   'docs/SECURITY.md',
+ ])
+   assert.ok(fs.statSync(f).isFile(), f);
+diff --git a/tools/package-smoke.cjs b/tools/package-smoke.cjs
+index 9e6be28..bd34830 100644
+--- a/tools/package-smoke.cjs
++++ b/tools/package-smoke.cjs
+@@ -5,6 +5,7 @@ const path = require('node:path');
+ const assert = require('node:assert/strict');
+ const { spawnSync, spawn } = require('node:child_process');
+ const { packProject, runNpm } = require('./npm-tools.cjs');
++const { name: packageName, version: expectedVersion } = require('../package.json');
+ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-report-packed-'));
+ let service;
+ function run(args, options = {}) {
+@@ -33,7 +34,7 @@ async function main() {
+     prefix,
+     ...(process.platform === 'win32' ? [] : ['lib']),
+     'node_modules',
+-    'codex-report',
++    ...packageName.split('/'),
+   );
+   const entry = path.join(packageRoot, 'dist', 'cli.js');
+   const home = path.join(temp, 'private store'),
+@@ -47,7 +48,7 @@ async function main() {
+   );
+   const command = (args, input) =>
+     run([entry, '--home', home, ...args], input === undefined ? {} : { input });
+-  assert.equal(command(['--version']).trim(), '0.0.1-dev');
++  assert.equal(command(['--version']).trim(), expectedVersion);
+   const shim = path.join(
+     prefix,
+     process.platform === 'win32' ? 'codex-report.cmd' : 'bin/codex-report',
+@@ -67,7 +68,7 @@ async function main() {
+     assert.equal(r.status, 0, r.stderr);
+     version = r.stdout;
+   }
+-  assert.equal(version.trim(), '0.0.1-dev');
++  assert.equal(version.trim(), expectedVersion);
+   command(['init', '--codex-home', codex]);
+   command(['init', '--codex-home', codex]);
+   assert.equal(JSON.parse(command(['doctor'])).hooks.length, 4);
+diff --git a/.github/dependabot.yml b/.github/dependabot.yml
+new file mode 100644
+index 0000000..1355b9b
+--- /dev/null
++++ b/.github/dependabot.yml
+@@ -0,0 +1,19 @@
++version: 2
++updates:
++  - package-ecosystem: npm
++    directory: /
++    schedule:
++      interval: weekly
++      day: monday
++      time: '07:00'
++      timezone: Etc/UTC
++    open-pull-requests-limit: 5
++
++  - package-ecosystem: github-actions
++    directory: /
++    schedule:
++      interval: weekly
++      day: monday
++      time: '07:00'
++      timezone: Etc/UTC
++    open-pull-requests-limit: 5
+diff --git a/.github/workflows/publish-npm.yml b/.github/workflows/publish-npm.yml
+new file mode 100644
+index 0000000..908af0d
+--- /dev/null
++++ b/.github/workflows/publish-npm.yml
+@@ -0,0 +1,29 @@
++name: Stage npm release
++on:
++  release:
++    types: [published]
++permissions:
++  contents: read
++  id-token: write
++jobs:
++  stage:
++    name: Verify and stage the stable release
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
++        with:
++          persist-credentials: false
++      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
++        with:
++          node-version: '24'
++          package-manager-cache: false
++      - name: Install pinned publishing tools
++        run: npm install --global npm@11.19.1 pnpm@10.11.0 --ignore-scripts --no-audit --no-fund
++      - name: Install locked dependencies
++        run: pnpm install --frozen-lockfile --ignore-scripts --no-audit --no-fund
++      - name: Verify project
++        run: pnpm run verify
++      - name: Check release version
++        run: node tools/check-release-version.cjs "$GITHUB_REF_NAME"
++      - name: Stage package for maintainer approval
++        run: npm stage publish --access public --provenance --tag latest
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+new file mode 100644
+index 0000000..7ff5abf
+--- /dev/null
++++ b/CHANGELOG.md
+@@ -0,0 +1,9 @@
++# Changelog
++
++Notable changes to Codex Report are recorded here. This project has not had a
++stable npm release.
++
++## Unreleased
++
++- Prepare public repository guidance, package metadata, and staged npm publishing.
++- Use `package.json` as the single source for the installed application version.
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+new file mode 100644
+index 0000000..be6cfbc
+--- /dev/null
++++ b/CONTRIBUTING.md
+@@ -0,0 +1,40 @@
++# Contributing
++
++Thanks for helping improve Codex Report. Please open a focused issue before
++substantial changes so the expected behavior and compatibility impact are clear.
++
++## Development setup
++
++- Node.js 18.20.8 or newer.
++- pnpm 10.11.0 for development dependencies and scripts.
++- Go is needed only when rebuilding the bundled native decoders.
++
++```sh
++pnpm install --ignore-scripts
++pnpm run format:check
++pnpm run lint
++pnpm run type-check
++pnpm run verify
++```
++
++The live browser check is separate. Follow the browser setup in the README, then
++run `pnpm run test:browser`. Do not disable a browser policy or turn a missing
++browser into a skipped pass.
++
++## Privacy and reports
++
++Do not attach Codex session files, transcripts, prompts, tokens, private
++configuration, or database files to issues or pull requests. Reduce a report to
++the smallest synthetic example that reproduces the behavior. Redact local paths
++and account identifiers from logs.
++
++## Changes and patch archive
++
++Keep pull requests focused and update user-facing documentation when behavior
++or commands change. Conversation-generated patches supplied with the project are
++archived under `patches/`; the source tree and Git history remain authoritative.
++
++## Releases
++
++Only maintainers prepare releases. See [the publishing guide](docs/PUBLISHING.md)
++for version checks and staged npm publishing.
+diff --git a/SECURITY.md b/SECURITY.md
+new file mode 100644
+index 0000000..64997be
+--- /dev/null
++++ b/SECURITY.md
+@@ -0,0 +1,18 @@
++# Security policy
++
++## Supported versions
++
++No stable npm release is available yet. Development builds, including
++`0.0.1-dev`, are not covered by a security support guarantee. After the first
++stable release, this project will document the supported release line here.
++
++## Reporting a vulnerability
++
++Please report security issues through [GitHub Private Vulnerability Reporting](https://github.com/kanakamedala-rajesh/codex-report/security/advisories/new).
++Do not report a vulnerability in a public issue or pull request, and do not
++attach real Codex session data, credentials, or private configuration.
++
++The repository owner must enable GitHub's private vulnerability reporting
++feature before the repository is made public. If the private report form is not
++available, do not publish exploit details; first use the repository's GitHub
++profile contact options to request a private reporting channel.
+diff --git a/docs/PUBLISHING.md b/docs/PUBLISHING.md
+new file mode 100644
+index 0000000..01692ba
+--- /dev/null
++++ b/docs/PUBLISHING.md
+@@ -0,0 +1,74 @@
++# Publishing Codex Report
++
++This guide prepares a release; it does not authorize or perform publication.
++The current `0.0.1-dev` version is intentionally blocked from the release
++workflow.
++
++## Before the first public npm release
++
++1. Publish as `@venkatasudhalabs/codex-report` under the npm organization
++   [scope `@venkatasudhalabs`](https://www.npmjs.com/org/venkatasudhalabs).
++   Confirm that the organization grants you publish access and that this exact
++   package name is available. The unscoped `codex-report` name is already taken.
++   The GitHub repository owner and npm organization are separate identities.
++2. Create the public repository at
++   `https://github.com/kanakamedala-rajesh/codex-report`. Keep the `repository`,
++   `homepage`, and `bugs` fields in `package.json` in sync with that exact URL.
++3. Enable GitHub Private Vulnerability Reporting and ensure the Security tab
++   points to the instructions in the root `SECURITY.md`.
++4. Review the complete Git history and the files selected by `pnpm run pack:local`.
++   Confirm that no private data, credentials, or local-only material is included.
++5. Replace the development version with the chosen stable SemVer version in
++   `package.json`. `src/version.ts` reads that value, and the release workflow
++   requires the GitHub release tag to be exactly `v<version>`.
++6. Require the full CI checks before creating a GitHub release. The workflow
++   builds, verifies, and stages the package; it does not publish it immediately.
++
++The npm registry could not be reached from the development environment when
++this guide was prepared, so availability of
++`@venkatasudhalabs/codex-report` has not been verified. Do not assume the name
++is free. Scoped packages default to private; this manifest and the publish
++commands explicitly set public visibility.
++
++## Bootstrap the npm package
++
++The npm staging command requires the package to exist in the registry. For the
++first stable release, the maintainer must publish the reviewed scoped package
++manually with npm account two-factor authentication and `--access public`.
++Review the tarball before publishing it and do not publish `0.0.1-dev` as the
++first public version.
++
++After that first publication:
++
++1. In `@venkatasudhalabs/codex-report` package settings, add a GitHub Actions
++   trusted publisher for owner `kanakamedala-rajesh`, repository `codex-report`,
++   workflow `publish-npm.yml`.
++2. Allow only `npm stage publish` for that trusted publisher. Require two-factor
++   authentication and disallow traditional publishing tokens for the package.
++3. Publish a GitHub Release with tag `v<package.json version>`. The workflow
++   verifies the tag and package version, runs `pnpm run verify`, then stages the
++   package publicly with provenance.
++4. Inspect the staged package and approve it with npm two-factor authentication.
++
++The publishing workflow uses npm's OpenID Connect trusted publishing and
++staging flow. It stores no npm token in GitHub Actions. The publisher is bound to
++the exact repository and workflow filename, so update the npm trust settings if
++either changes.
++
++## Local release checks
++
++```sh
++pnpm install --frozen-lockfile --ignore-scripts
++pnpm run verify
++pnpm run pack:local
++npm pack --dry-run --ignore-scripts
++```
++
++Inspect the package file list and run the isolated install smoke before a
++release. Never commit npm credentials or local `.npmrc` files.
++
++References: [npm package metadata fields](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/),
++[publishing scoped public packages](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/),
++[npm trusted publishing](https://docs.npmjs.com/trusted-publishers/),
++[npm staged publishing](https://docs.npmjs.com/cli/v11/commands/npm-stage/), and
++[npm provenance](https://docs.npmjs.com/generating-provenance-statements/).
+diff --git a/patches/README.md b/patches/README.md
+new file mode 100644
+index 0000000..193f8e3
+--- /dev/null
++++ b/patches/README.md
+@@ -0,0 +1,11 @@
++# Patch archive
++
++This directory keeps conversation-generated patch files supplied during the
++project's development. The initial implementation was built with GPT-6-PRO in a
++ChatGPT conversation; later patch artifacts are preserved here as part of that
++development record.
++
++Patch files are historical diffs and may target a specific earlier tree. Review
++their base and contents before applying them. The current source tree and Git
++history are authoritative. Patch archives do not replace release notes or
++contributor attribution.
+diff --git a/tools/check-release-version.cjs b/tools/check-release-version.cjs
+new file mode 100644
+index 0000000..3433d85
+--- /dev/null
++++ b/tools/check-release-version.cjs
+@@ -0,0 +1,23 @@
++'use strict';
++const path = require('node:path');
++const packageJson = require(path.resolve(__dirname, '../package.json'));
++const { VERSION } = require('../dist/version.js');
++const tag = process.argv[2];
++
++if (process.argv.length !== 3 || !tag) {
++  console.error('Usage: node tools/check-release-version.cjs <release-tag>');
++  process.exitCode = 1;
++} else if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(packageJson.version)) {
++  console.error(`Refusing to stage prerelease or invalid package version: ${packageJson.version}`);
++  process.exitCode = 1;
++} else if (VERSION !== packageJson.version) {
++  console.error(
++    `Built application version ${VERSION} does not match package version ${packageJson.version}.`,
++  );
++  process.exitCode = 1;
++} else if (tag !== `v${packageJson.version}`) {
++  console.error(`Release tag ${tag} must match v${packageJson.version}.`);
++  process.exitCode = 1;
++} else {
++  console.log(`Release tag ${tag} matches package version ${packageJson.version}.`);
++}

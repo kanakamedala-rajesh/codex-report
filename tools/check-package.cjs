@@ -4,8 +4,13 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 const p = require('../package.json');
-assert.equal(p.name, 'codex-report');
-assert.equal(p.version, '0.0.1-dev');
+assert.equal(p.name, '@venkatasudhalabs/codex-report');
+assert.equal(p.publishConfig.access, 'public');
+assert.match(
+  p.version,
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+  'Package version must be valid SemVer',
+);
 assert.equal(p.bin['codex-report'], 'dist/cli.js');
 assert.ok(
   !p.scripts.install && !p.scripts.postinstall && !p.scripts.prepare,
@@ -19,6 +24,7 @@ for (const f of [
   'public/style.css',
   'data/prices.json',
   'README.md',
+  'SECURITY.md',
   'docs/SECURITY.md',
 ])
   assert.ok(fs.statSync(f).isFile(), f);

@@ -1,23 +1,38 @@
-# Codex Report v0.0.1-dev
+# Codex Report
 
-A fresh, standalone npm application for local Codex usage reporting. It includes
-real initialization, persistent accounting, readable turn/interruption reports,
-an explicit foreground collector, and a live browser dashboard. No previous
-application, migration, Python installation, API key, or paid API call is required.
+Codex Report is a local-first CLI and dashboard for accounting and reports from
+Codex sessions. It includes persistent usage accounting, turn and interruption
+reports, an explicit foreground collector, and a live browser dashboard. It does
+not require a Python installation, API key, or paid API call.
 
-**This is a development release.** The application is implemented and exercised
-on Linux x64 / Node 22.16.0. Windows, macOS, ARM64 and the exact Node 18.20.8
-runtime are target platforms, not claimed runtime passes in this build. See
-[verification](docs/TEST-REPORT.md) for the executed evidence and open gates.
+**Status:** Development prerelease. Version `0.0.1-dev` has not been published
+to npm. This application has been exercised on Linux x64 / Node 22.16.0;
+Windows, macOS, ARM64, Node 18.20.8 and the CI matrix remain unverified here. See
+the [validation report](docs/TEST-REPORT.md) for recorded checks and open gates.
 
-## Install the packed application
+## Project origin and AI use
 
-Download the actual `codex-report-0.0.1-dev.tgz` supplied with this release. Do not
-install an unrelated package by guessing the public registry name: this project
-has not been published to npm.
+The initial implementation was built in a ChatGPT conversation using GPT-6-PRO.
+The project is maintained by [kanakamedala-rajesh](https://github.com/kanakamedala-rajesh).
+The Git author label `GPT-6-PRO (ChatGPT)` records that code-generation origin;
+it is not an OpenAI account or an endorsement. Codex Report is an independent
+project and is not an official OpenAI product.
+
+Conversation-generated patch files are kept in [`patches/`](patches/README.md)
+when supplied. They are historical diffs; the current source tree is canonical.
+
+## Install this development build
+
+The package is not available from the public npm registry yet. From a local
+checkout, build and create the tarball, then install that local file:
+
+The package name is `@venkatasudhalabs/codex-report`; its installed command
+remains `codex-report`.
 
 ```sh
-npm install -g --ignore-scripts ./codex-report-0.0.1-dev.tgz
+pnpm install --ignore-scripts
+pnpm run pack:local
+npm install -g --ignore-scripts ./venkatasudhalabs-codex-report-0.0.1-dev.tgz
 codex-report --version
 codex-report init
 codex-report doctor
@@ -26,9 +41,9 @@ codex-report sync
 codex-report start --open
 ```
 
-The expected version is `0.0.1-dev`. These commands work with the normal npm
-command launcher; there is no separate Python or shell installer. On Windows,
-run them in PowerShell. Install separately inside each WSL distribution.
+The expected version is `0.0.1-dev`. The tarball filename contains the version
+from `package.json`. On Windows, run these commands in PowerShell. Install
+separately inside each WSL distribution.
 
 **Node requirement:** 18.20.8 or newer. On Node 18/20 the optional `libsql@0.5.29`
 prebuilt database dependency is required; do **not** install with `--omit=optional`
@@ -300,8 +315,9 @@ are deduplicated across imports; ambiguous legacy identities have narrower
 coverage. Conflicting usage preserves local values and is reported.
 
 `uninstall-hooks` removes only the exact managed hook definitions, preserving
-unrelated hooks and all stored data. Then `npm uninstall -g codex-report` removes
-the application. Private data removal remains a deliberate filesystem operation.
+unrelated hooks and all stored data. Then
+`npm uninstall -g @venkatasudhalabs/codex-report` removes the application.
+Private data removal remains a deliberate filesystem operation.
 
 ## Development and quality checks
 
@@ -315,15 +331,16 @@ archive in the repository root, run:
 pnpm run pack:local
 ```
 
-The result is `codex-report-0.0.1-dev.tgz`. Nothing is published and nothing is
-installed by this command. A later run replaces that generated tarball.
+The result is `venkatasudhalabs-codex-report-0.0.1-dev.tgz`. Nothing is published
+and nothing is installed by this command. A later run replaces that generated
+tarball.
 `test:package`, in contrast, packs into a temporary directory, tests an isolated
 installation, and removes that temporary directory afterwards.
 
 To test/install your freshly built tarball on this machine:
 
 ```sh
-npm install -g --ignore-scripts ./codex-report-0.0.1-dev.tgz
+npm install -g --ignore-scripts ./venkatasudhalabs-codex-report-0.0.1-dev.tgz
 codex-report --version
 codex-report doctor
 ```
@@ -348,8 +365,8 @@ does not install Chromium. Install the matching browser once and repeat this
 step after changing the Playwright version:
 
 ```sh
-pnpm browser:install
-pnpm test:browser
+pnpm run browser:install
+pnpm run test:browser
 ```
 
 `browser:install` runs the installed `playwright-core install chromium` CLI, not
@@ -388,16 +405,16 @@ after the explicit browser setup above.
 
 ```sh
 pnpm install --ignore-scripts
-pnpm format
-pnpm format:check
-pnpm  lint
-pnpm type-check
-pnpm test
-pnpm test:coverage
-pnpm test:package
-pnpm check:package
-pnpm verify
-pnpm audit:dependencies
+pnpm run format
+pnpm run format:check
+pnpm run lint
+pnpm run type-check
+pnpm run test
+pnpm run test:coverage
+pnpm run test:package
+pnpm run check:package
+pnpm run verify
+pnpm run audit:dependencies
 ```
 
 TypeScript strict mode covers server code; a separate checked-JavaScript project
@@ -405,7 +422,8 @@ covers the browser against shared backend types. Prettier is pinned. ESLint
 includes TypeScript recommended and floating-promise checks. The complete verify
 command fails if a required tool is missing: it does not silently skip linting.
 
-The build container could not resolve the npm registry. It used the available
+The validation report is a historical snapshot from September 24, 2026. The
+build container could not resolve the npm registry. It used the available
 TypeScript compiler and an integrity-checked official Prettier 3.9.9 build.
 ESLint, dependency audit, the libsql runtime and exact Node 18 execution could not
 be exercised there. Direct versions are pinned, and the pnpm lockfile records the
@@ -422,10 +440,13 @@ build-time** requirement only:
 ```sh
 node tools/build-native.cjs
 pnpm build
-pnpm pack:local
+pnpm run pack:local
 ```
 
 The runtime executable sources and BSD license are included. Go 1.23.2 was the
 available build toolchain; this is provenance, not a claim of current toolchain
 security maintenance. See [architecture](docs/ARCHITECTURE.md),
-[security](docs/SECURITY.md), and [phase plan](docs/IMPLEMENTATION-PLAN.md).
+[security](docs/SECURITY.md), [contributing](CONTRIBUTING.md),
+[publishing](docs/PUBLISHING.md), [changelog](CHANGELOG.md), and the
+[implementation plan](docs/IMPLEMENTATION-PLAN.md). The package is licensed
+under [MIT](LICENSE); please report vulnerabilities using [SECURITY.md](SECURITY.md).

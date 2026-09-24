@@ -1,7 +1,33 @@
 {
-  "name": "codex-report",
+  "name": "@venkatasudhalabs/codex-report",
   "version": "0.0.1-dev",
   "description": "Local Codex usage accounting, readable turn reports and a live dashboard",
+  "packageManager": "pnpm@10.11.0",
+  "author": {
+    "name": "kanakamedala-rajesh",
+    "url": "https://github.com/kanakamedala-rajesh"
+  },
+  "homepage": "https://github.com/kanakamedala-rajesh/codex-report#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanakamedala-rajesh/codex-report.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bugs": {
+    "url": "https://github.com/kanakamedala-rajesh/codex-report/issues"
+  },
+  "keywords": [
+    "codex",
+    "openai",
+    "token-usage",
+    "usage-analytics",
+    "sqlite",
+    "dashboard",
+    "codex-cli",
+    "local-first"
+  ],
   "license": "MIT",
   "type": "commonjs",
   "bin": {
@@ -16,6 +42,7 @@
     "data",
     "README.md",
     "LICENSE",
+    "SECURITY.md",
     "docs/SECURITY.md",
     "runtime",
     "docs/TEST-REPORT.md",
