@@ -17,5 +17,11 @@ for (const os of ['linux', 'windows', 'darwin']) {
     manifest[name] = crypto.createHash('sha256').update(fs.readFileSync(out)).digest('hex');
   }
 }
-fs.writeFileSync(path.join(root, 'runtime', 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-fs.copyFileSync(path.join(root, 'tools', 'native', 'LICENSE'), path.join(root, 'runtime', 'LICENSE'));
+fs.writeFileSync(
+  path.join(root, 'runtime', 'manifest.json'),
+  JSON.stringify(manifest, null, 2) + '\n',
+);
+fs.copyFileSync(
+  path.join(root, 'tools', 'native', 'LICENSE'),
+  path.join(root, 'runtime', 'LICENSE'),
+);

@@ -11,28 +11,64 @@
   <body>
     <a class="skip" href="#main">Skip to analytics</a>
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">cr</span><div>Codex Report<small>LOCAL USAGE ANALYTICS</small></div></div>
+      <div class="brand">
+        <span class="brand-mark">cr</span>
+        <div>Codex Report<small>LOCAL USAGE ANALYTICS</small></div>
+      </div>
       <nav aria-label="Analytics views">
         <button data-view="overview" class="selected" aria-current="page">Overview</button>
         <button data-view="turns">Turns &amp; agents</button>
         <button data-view="limits">Usage comparison</button>
         <button data-view="health">Data health</button>
       </nav>
-      <div class="sidebar-foot"><span class="dot"></span>Local to this device<p>No prompts. No telemetry.<br />No provider API calls.</p><small>v0.0.1-dev</small></div>
+      <div class="sidebar-foot">
+        <span class="dot"></span>Local to this device
+        <p>No prompts. No telemetry.<br />No provider API calls.</p>
+        <small>v0.0.1-dev</small>
+      </div>
     </aside>
     <main id="main">
-      <header><div><p class="eyebrow">YOUR CODEX ACTIVITY</p><h1 id="title">Overview</h1><p class="subtitle">Understand each turn. Keep the detail.</p></div><div class="live" id="connection" role="status">Connecting</div></header>
+      <header>
+        <div>
+          <p class="eyebrow">YOUR CODEX ACTIVITY</p>
+          <h1 id="title">Overview</h1>
+          <p class="subtitle">Understand each turn. Keep the detail.</p>
+        </div>
+        <div class="live" id="connection" role="status">Connecting</div>
+      </header>
       <section class="filters" aria-label="Report filters">
-        <label>Period<select id="period"><option value="cycle">Billing cycle / month</option><option value="5h">Last five hours</option><option value="day">Today</option><option value="week">This week</option><option value="lifetime">Recorded lifetime</option></select></label>
-        <label>Account<select id="account"><option value="all">All recorded accounts</option></select></label>
-        <label>Model<select id="model"><option value="">All models</option></select></label>
-        <button id="refresh" class="secondary">Refresh</button><button id="download" class="secondary">Export JSON</button>
+        <label
+          >Period<select id="period">
+            <option value="cycle">Billing cycle / month</option>
+            <option value="5h">Last five hours</option>
+            <option value="day">Today</option>
+            <option value="week">This week</option>
+            <option value="lifetime">Recorded lifetime</option>
+          </select></label
+        >
+        <label
+          >Account<select id="account">
+            <option value="all">All recorded accounts</option>
+          </select></label
+        >
+        <label
+          >Model<select id="model">
+            <option value="">All models</option>
+          </select></label
+        >
+        <button id="refresh" class="secondary">Refresh</button
+        ><button id="download" class="secondary">Export JSON</button>
       </section>
       <p id="period-info" class="fine"></p>
       <div id="error" class="notice hidden" role="alert"></div>
       <div id="failure" class="notice hidden" role="status"></div>
-      <section id="content" aria-label="Report content"><div class="empty">Connecting to your local ledger...</div></section>
-      <footer><span id="freshness">No data received yet.</span><span>API-equivalent estimates, not billed charges.</span></footer>
+      <section id="content" aria-label="Report content">
+        <div class="empty">Connecting to your local ledger...</div>
+      </section>
+      <footer>
+        <span id="freshness">No data received yet.</span
+        ><span>API-equivalent estimates, not billed charges.</span>
+      </footer>
     </main>
   </body>
 </html>
