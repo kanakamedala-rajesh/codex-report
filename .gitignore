@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.tgz
+*.sqlite3*
+*.crx
+.env
+.DS_Store

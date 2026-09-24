@@ -1,0 +1,48 @@
+{
+  "name": "codex-report",
+  "version": "0.0.1-dev",
+  "description": "Local Codex usage accounting, readable turn reports and a live dashboard",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "codex-report": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=18.20.8"
+  },
+  "files": [
+    "dist",
+    "public",
+    "data",
+    "README.md",
+    "LICENSE",
+    "docs/SECURITY.md",
+    "runtime"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "npm run type-check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "test": "npm run build && node --test test/*.test.cjs",
+    "test:coverage": "npm run build && node --experimental-test-coverage --test test/*.test.cjs",
+    "test:package": "npm run build && node tools/package-smoke.cjs",
+    "check:package": "node tools/check-package.cjs",
+    "check": "npm run format:check && npm run lint && npm run type-check && npm test && npm run check:package",
+    "verify": "npm run check && npm run test:package"
+  },
+  "optionalDependencies": {
+    "libsql": "0.5.29"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.25.1",
+    "@types/node": "22.19.7",
+    "eslint": "9.25.1",
+    "globals": "16.1.0",
+    "prettier": "3.6.2",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.31.1"
+  }
+}
