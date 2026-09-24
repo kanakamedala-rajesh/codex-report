@@ -1,0 +1,8 @@
+{
+  "zstd-linux-amd64": "07d69c0b98c0ab7790cf21bc3a2061d695e1864b3481882c8b2a9b053d6ae85b",
+  "zstd-linux-arm64": "05052d2486c03f213d62d79a7ce6d75773dd43f5b4b875f0b9188a6ea2e6932d",
+  "zstd-windows-amd64.exe": "f11f9e5fbf317880ea64ebf1954443644ef82e099a739e009b545f1ce0a5f8e0",
+  "zstd-windows-arm64.exe": "b12aa721eef46fddca708f449923b0866b896714c8dd4a2dfddf1172b633bdd6",
+  "zstd-darwin-amd64": "dac1c3fbef0385c9fad50c7aec42f1c4b49e911eb2bf2717198b3d67018efc9d",
+  "zstd-darwin-arm64": "afbcb1b116dd333bc8835203f8a6c5efb1062331c9e528e030472c627b6ec67f"
+}

@@ -1,0 +1,126 @@
+TAP version 13
+# (node:4468) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: runtime accepts the specified minimum and later runtimes
+ok 1 - runtime accepts the specified minimum and later runtimes
+  ---
+  duration_ms: 1.057789
+  type: 'test'
+  ...
+# Subtest: fresh configuration and repeated initialization preserve identity/token
+ok 2 - fresh configuration and repeated initialization preserve identity/token
+  ---
+  duration_ms: 16.388865
+  type: 'test'
+  ...
+# Subtest: reject invalid configuration port
+ok 3 - reject invalid configuration port
+  ---
+  duration_ms: 1.069306
+  type: 'test'
+  ...
+# Subtest: reject invalid configuration pollMs
+ok 4 - reject invalid configuration pollMs
+  ---
+  duration_ms: 0.712366
+  type: 'test'
+  ...
+# Subtest: reject invalid configuration display
+ok 5 - reject invalid configuration display
+  ---
+  duration_ms: 1.758166
+  type: 'test'
+  ...
+# Subtest: reject invalid configuration timezone
+ok 6 - reject invalid configuration timezone
+  ---
+  duration_ms: 1.590569
+  type: 'test'
+  ...
+# Subtest: token fields retain reasoning as a subset
+ok 7 - token fields retain reasoning as a subset
+  ---
+  duration_ms: 0.311291
+  type: 'test'
+  ...
+# Subtest: first physical session owner cannot be replaced by inherited parent
+ok 8 - first physical session owner cannot be replaced by inherited parent
+  ---
+  duration_ms: 0.964928
+  type: 'test'
+  ...
+# Subtest: foreign inherited native request is not attributed to child
+ok 9 - foreign inherited native request is not attributed to child
+  ---
+  duration_ms: 0.238651
+  type: 'test'
+  ...
+# Subtest: quota-only notification retained with its real window
+ok 10 - quota-only notification retained with its real window
+  ---
+  duration_ms: 0.573086
+  type: 'test'
+  ...
+# Subtest: terminal errors preserve failure codes without private messages
+ok 11 - terminal errors preserve failure codes without private messages
+  ---
+  duration_ms: 0.310098
+  type: 'test'
+  ...
+# Subtest: manual cancellation is not completion
+ok 12 - manual cancellation is not completion
+  ---
+  duration_ms: 0.121965
+  type: 'test'
+  ...
+# Subtest: SQLite persists, deduplicates and rolls transactions back
+ok 13 - SQLite persists, deduplicates and rolls transactions back
+  ---
+  duration_ms: 5.197994
+  type: 'test'
+  ...
+# Subtest: writer lease protects shared store
+ok 14 - writer lease protects shared store
+  ---
+  duration_ms: 2.039482
+  type: 'test'
+  ...
+# Subtest: native data supersedes same-turn fallback without doubling totals
+ok 15 - native data supersedes same-turn fallback without doubling totals
+  ---
+  duration_ms: 1.798688
+  type: 'test'
+  ...
+# Subtest: frozen price fields survive duplicate observations
+ok 16 - frozen price fields survive duplicate observations
+  ---
+  duration_ms: 3.550215
+  type: 'test'
+  ...
+# Subtest: backup is a valid standalone SQLite database
+ok 17 - backup is a valid standalone SQLite database
+  ---
+  duration_ms: 3.274018
+  type: 'test'
+  ...
+# Subtest: price arithmetic includes cache writes but never charges reasoning twice
+ok 18 - price arithmetic includes cache writes but never charges reasoning twice
+  ---
+  duration_ms: 0.717985
+  type: 'test'
+  ...
+# Subtest: atomic output preserves a complete replacement
+ok 19 - atomic output preserves a complete replacement
+  ---
+  duration_ms: 1.584525
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 105.600355

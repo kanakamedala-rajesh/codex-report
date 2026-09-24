@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "asOf": "2026-09-24",
+  "models": {
+    "gpt-6-sol": {"input":"2","cached":"0.2","write":"2.5","output":"10","source":"https://developers.openai.com/api/docs/models/gpt-6-sol"},
+    "gpt-5.6-sol": {"input":"4","cached":"0.4","write":"5","output":"20","threshold":272000,"inputMultiplier":"2","outputMultiplier":"1.5","expires":"2026-11-21T23:59:59Z","source":"https://developers.openai.com/api/docs/models/gpt-5.6-sol"},
+    "gpt-5.6-terra": {"input":"2","cached":"0.2","write":"2.5","output":"12","threshold":272000,"inputMultiplier":"2","outputMultiplier":"1.5","source":"https://developers.openai.com/api/docs/models/gpt-5.6-terra"}
+  },
+  "aliases": {"gpt-5.6":"gpt-5.6-sol"}
+}
