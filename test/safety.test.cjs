@@ -66,7 +66,7 @@ for (const text of ['{"x":1,"x":2}', '{"a":{"x":1,"x":2}}', '{"x":1,"\\u0078":2}
     assert.throws(() => parseJson(text), /Duplicate/),
   );
 test('strict settings reader accepts nested arrays, escapes and independent keys', () =>
-  assert.deepEqual(parseJson('{"a":[{"x":"a\\\"b"},{"x":2}],"b":null}'), {
+  assert.deepEqual(parseJson('{"a":[{"x":"a\\"b"},{"x":2}],"b":null}'), {
     a: [{ x: 'a"b' }, { x: 2 }],
     b: null,
   }));

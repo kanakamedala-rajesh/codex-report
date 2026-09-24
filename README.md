@@ -305,18 +305,99 @@ the application. Private data removal remains a deliberate filesystem operation.
 
 ## Development and quality checks
 
+### Build an installable tarball
+
+`pnpm run build` compiles TypeScript into `dist/`. It does not
+create a tarball. To build, check the package contents, and create the installable
+archive in the repository root, run:
+
 ```sh
-npm install --ignore-scripts
-npm run format
-npm run format:check
-npm run lint
-npm run type-check
-npm test
-npm run test:coverage
-npm run test:package
-npm run check:package
-npm run verify
-npm run audit:dependencies
+pnpm run pack:local
+```
+
+The result is `codex-report-0.0.1-dev.tgz`. Nothing is published and nothing is
+installed by this command. A later run replaces that generated tarball.
+`test:package`, in contrast, packs into a temporary directory, tests an isolated
+installation, and removes that temporary directory afterwards.
+
+To test/install your freshly built tarball on this machine:
+
+```sh
+npm install -g --ignore-scripts ./codex-report-0.0.1-dev.tgz
+codex-report --version
+codex-report doctor
+```
+
+The new `pack:local` command and the package smoke test use the **real npm CLI**,
+even when invoked through pnpm. They must not treat `npm_execpath` as npm: pnpm
+sets that variable to its own executable, whose flags and output differ. npm's
+entrypoint is resolved from the installed Node/npm layout or PATH and launched
+without a shell. If a custom runtime manager hides npm, set
+`CODEX_REPORT_NPM_CLI` to the installed `npm/bin/npm-cli.js`; it is never downloaded
+on demand. Package lifecycle scripts remain disabled while packing/installing
+the test artifact. This does not add installation hooks to the application.
+
+Use pnpm 10.11.0 for development commands. The package smoke test and local pack
+command call the installed npm CLI internally because npm provides the package
+archive and isolated installation operations; invoke those tasks through pnpm.
+
+### Browser test setup (development only)
+
+The project depends on **playwright-core**. Installing the JavaScript dependency
+does not install Chromium. Install the matching browser once and repeat this
+step after changing the Playwright version:
+
+```sh
+pnpm browser:install
+pnpm test:browser
+```
+
+`browser:install` runs the installed `playwright-core install chromium` CLI, not
+an unpinned `npx` download. It downloads browser files but does not install system
+packages. On Linux/WSL, if Playwright subsequently reports missing shared libraries,
+review `pnpm exec playwright-core install-deps chromium` with your machine's
+administrator; it may require system-package installation privileges.
+
+To use a compatible browser already installed instead of downloading one:
+
+```sh
+CODEX_REPORT_BROWSER_PATH=/absolute/path/to/chrome pnpm run test:browser
+```
+
+PowerShell:
+
+```powershell
+$env:CODEX_REPORT_BROWSER_PATH = 'C:\Path\To\chrome.exe'
+pnpm run test:browser
+Remove-Item Env:CODEX_REPORT_BROWSER_PATH
+```
+
+Playwright works best with its matching bundled browser; an arbitrary installed
+Chrome version is not guaranteed compatible. Browser setup is **not required**
+for running the Codex Report application or building the tarball. Missing browser
+binaries fail the test with instructions; they are never automatically downloaded,
+silently skipped, or counted as a pass. A managed-browser policy failure is not a
+reason to disable that policy. The offline fixture mode, when explicitly used,
+is only a DOM check and is not a live browser-to-server test.
+
+### Run the checks
+
+Install dependencies and run the development checks through pnpm. `verify` runs
+the non-browser gates and packed-install smoke; run `test:browser` separately
+after the explicit browser setup above.
+
+```sh
+pnpm install --ignore-scripts
+pnpm format
+pnpm format:check
+pnpm  lint
+pnpm type-check
+pnpm test
+pnpm test:coverage
+pnpm test:package
+pnpm check:package
+pnpm verify
+pnpm audit:dependencies
 ```
 
 TypeScript strict mode covers server code; a separate checked-JavaScript project
@@ -327,10 +408,9 @@ command fails if a required tool is missing: it does not silently skip linting.
 The build container could not resolve the npm registry. It used the available
 TypeScript compiler and an integrity-checked official Prettier 3.9.9 build.
 ESLint, dependency audit, the libsql runtime and exact Node 18 execution could not
-be exercised there. Direct versions are pinned; a registry-resolved lockfile has
-not been fabricated. Generate/review it after an online dependency installation.
-CI installs the declared dependencies and executes the full gates on its matrix;
-a workflow file is not evidence that CI has run.
+be exercised there. Direct versions are pinned, and the pnpm lockfile records the
+resolved dependency graph. CI installs the declared dependencies and executes the
+full gates on its matrix; a workflow file is not evidence that CI has run.
 
 For offline package validation on a Node with built-in SQLite, development CI can
 set `CODEX_REPORT_OFFLINE_ONLY=1`; that smoke test intentionally omits optional
@@ -341,8 +421,8 @@ build-time** requirement only:
 
 ```sh
 node tools/build-native.cjs
-npm run build
-npm pack --ignore-scripts
+pnpm build
+pnpm pack:local
 ```
 
 The runtime executable sources and BSD license are included. Go 1.23.2 was the

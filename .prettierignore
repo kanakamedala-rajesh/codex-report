@@ -5,3 +5,4 @@ coverage/
 *.bundle
 package-lock.json
 docs/evidence/
+pnpm-lock.yaml

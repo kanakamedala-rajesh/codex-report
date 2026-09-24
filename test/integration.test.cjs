@@ -251,6 +251,7 @@ test('all-unpriced reports never claim zero-dollar cost', async (t) => {
 test('live service authenticates, blocks cross-origin access and observes unhooked failure', async (t) => {
   const { h, root } = init(t);
   const s = new Store(h);
+  const expectedBackend = s.backend;
   s.close();
   const service = await startService(h);
   try {
@@ -274,7 +275,9 @@ test('live service authenticates, blocks cross-origin access and observes unhook
       if (result.tasks.length) break;
     }
     assert.equal(result.tasks[0].status, 'failed');
-    assert.equal((await rpc(h, '/api/status')).backend.includes('sqlite'), true);
+    // The service must report the driver actually selected for this store.
+    // Both node:sqlite and libsql are valid; libsql does not contain 'sqlite'.
+    assert.equal((await rpc(h, '/api/status')).backend, expectedBackend);
     const auth = await fetch(base + '/api/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

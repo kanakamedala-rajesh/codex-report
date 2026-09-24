@@ -25,18 +25,20 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json",
-    "typecheck": "npm run type-check",
+    "typecheck": "pnpm run type-check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
-    "test": "npm run build && node tools/test-runner.cjs",
-    "test:coverage": "npm run build && node tools/test-runner.cjs --coverage",
-    "test:package": "npm run build && node tools/package-smoke.cjs",
+    "test": "pnpm run build && node tools/test-runner.cjs",
+    "test:coverage": "pnpm run build && node tools/test-runner.cjs --coverage",
+    "test:package": "pnpm run build && node tools/package-smoke.cjs",
     "check:package": "node tools/check-package.cjs",
-    "check": "npm run format:check && npm run lint && npm run type-check && npm test && npm run check:package",
-    "verify": "npm run check && npm run test:package",
-    "audit:dependencies": "npm audit --omit=dev --audit-level=high",
-    "test:browser": "npm run build && node tools/browser-smoke.cjs"
+    "check": "pnpm run format:check && pnpm run lint && pnpm run type-check && pnpm test && pnpm run check:package",
+    "verify": "pnpm run check && pnpm run test:package",
+    "audit:dependencies": "pnpm audit --omit=dev --audit-level=high",
+    "test:browser": "pnpm run build && node tools/browser-smoke.cjs",
+    "pack:local": "pnpm run build && pnpm run check:package && node tools/pack.cjs",
+    "browser:install": "playwright-core install chromium"
   },
   "optionalDependencies": {
     "libsql": "0.5.29"

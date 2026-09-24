@@ -4,10 +4,9 @@ const os = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { spawnSync, spawn } = require('node:child_process');
+const { packProject, runNpm } = require('./npm-tools.cjs');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-report-packed-'));
 let service;
-const npm = process.env.npm_execpath;
-if (!npm) throw new Error('Run through npm run test:package.');
 function run(args, options = {}) {
   const r = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 60000, ...options });
   if (r.error) throw r.error;
@@ -16,14 +15,10 @@ function run(args, options = {}) {
 }
 const pause = (n) => new Promise((r) => setTimeout(r, n));
 async function main() {
-  const packed = JSON.parse(
-    run([npm, 'pack', '--ignore-scripts', '--json', '--pack-destination', temp]),
-  )[0];
-  const artifact = path.join(temp, packed.filename);
+  const artifact = packProject(temp);
   const prefix = path.join(temp, 'global install');
   const offline = process.env.CODEX_REPORT_OFFLINE_ONLY === '1';
-  run([
-    npm,
+  runNpm([
     'install',
     '--global',
     '--prefix',

@@ -19,11 +19,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: npm run verify
-      - run: npm run audit:dependencies
+      - run: npm install --global pnpm@10.11.0 --ignore-scripts --no-audit --no-fund
+      - run: pnpm install --frozen-lockfile --ignore-scripts --no-audit --no-fund
+      - run: pnpm run verify
+      - run: pnpm run audit:dependencies
+      - run: pnpm run pack:local
       - name: Check the older-runtime database explicitly
         if: matrix.node == '18.20.8'
         run: node dist/cli.js self-test
         env:
           CODEX_REPORT_SQLITE_BACKEND: libsql
+
+  browser:
+    name: Live dashboard browser test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --global pnpm@10.11.0 --ignore-scripts --no-audit --no-fund
+      - run: pnpm install --frozen-lockfile --ignore-scripts --no-audit --no-fund
+      # System dependencies are installed only in this disposable CI runner.
+      - run: pnpm exec playwright-core install --with-deps chromium
+      - run: pnpm run test:browser

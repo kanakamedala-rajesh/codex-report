@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
+const { launchBrowser } = require('./browser-launch.cjs');
 const playwright = require(process.env.CODEX_REPORT_PLAYWRIGHT || 'playwright-core');
 const { initializeConfig, saveConfig } = require('../dist/config');
 const { Store } = require('../dist/database');
@@ -85,14 +86,9 @@ const store = new Store(temp);
 store.close();
 let browser, service;
 async function main() {
+  // Fail with setup instructions before launching a collector when the browser is absent.
+  browser = await launchBrowser(playwright);
   service = await startService(temp);
-  browser = await playwright.chromium.launch({
-    headless: true,
-    ...(process.env.CODEX_REPORT_BROWSER_PATH
-      ? { executablePath: process.env.CODEX_REPORT_BROWSER_PATH }
-      : {}),
-    args: ['--no-sandbox'],
-  });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
   const errors = [],
     external = [];
@@ -196,12 +192,18 @@ async function main() {
   );
 }
 main()
+  .finally(async () => {
+    try {
+      await browser?.close();
+    } finally {
+      try {
+        await service?.close();
+      } finally {
+        fs.rmSync(temp, { recursive: true, force: true });
+      }
+    }
+  })
   .catch((e) => {
     console.error(e);
     process.exitCode = 1;
-  })
-  .finally(async () => {
-    await browser?.close();
-    await service?.close();
-    fs.rmSync(temp, { recursive: true, force: true });
   });
