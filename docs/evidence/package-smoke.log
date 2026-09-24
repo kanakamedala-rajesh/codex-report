@@ -1,0 +1,28 @@
+
+> codex-report@0.0.1-dev test:package
+> npm run build && node tools/package-smoke.cjs
+
+
+> codex-report@0.0.1-dev build
+> tsc -p tsconfig.json
+
+{
+  "status": "PASS",
+  "node": "v22.16.0",
+  "platform": "linux",
+  "offline": true,
+  "checks": [
+    "npm package install and actual shim",
+    "init and repeat init",
+    "real doctor",
+    "device self-test",
+    "persistent deduplication",
+    "failure without Stop",
+    "authenticated dashboard",
+    "manual interruption and repeat suppression",
+    "clean shutdown",
+    "exchange preview/apply",
+    "backup/restore",
+    "uninstall preserving unrelated hooks"
+  ]
+}

@@ -1,0 +1,4 @@
+
+> codex-report@0.0.1-dev type-check
+> tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json
+

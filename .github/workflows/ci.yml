@@ -1,0 +1,29 @@
+name: Quality and packed runtime
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-14]
+        node: ['18.20.8', '22', '24']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm run verify
+      - run: npm run audit:dependencies
+      - name: Check the older-runtime database explicitly
+        if: matrix.node == '18.20.8'
+        run: node dist/cli.js self-test
+        env:
+          CODEX_REPORT_SQLITE_BACKEND: libsql

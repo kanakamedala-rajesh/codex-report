@@ -1,0 +1,5 @@
+npm audit --offline --omit=dev --audit-level=high
+Exit code: 1
+ENOLOCK: audit requires a registry-resolved lockfile.
+Registry resolution was unavailable in the build environment.
+This is a blocked check, not a clean audit result.

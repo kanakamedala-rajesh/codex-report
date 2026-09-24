@@ -17,21 +17,26 @@
     "README.md",
     "LICENSE",
     "docs/SECURITY.md",
-    "runtime"
+    "runtime",
+    "docs/TEST-REPORT.md",
+    "docs/ARCHITECTURE.md",
+    "docs/SOURCES.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "type-check": "tsc -p tsconfig.json --noEmit",
+    "type-check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json",
     "typecheck": "npm run type-check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
-    "test": "npm run build && node --test test/*.test.cjs",
-    "test:coverage": "npm run build && node --experimental-test-coverage --test test/*.test.cjs",
+    "test": "npm run build && node tools/test-runner.cjs",
+    "test:coverage": "npm run build && node tools/test-runner.cjs --coverage",
     "test:package": "npm run build && node tools/package-smoke.cjs",
     "check:package": "node tools/check-package.cjs",
     "check": "npm run format:check && npm run lint && npm run type-check && npm test && npm run check:package",
-    "verify": "npm run check && npm run test:package"
+    "verify": "npm run check && npm run test:package",
+    "audit:dependencies": "npm audit --omit=dev --audit-level=high",
+    "test:browser": "npm run build && node tools/browser-smoke.cjs"
   },
   "optionalDependencies": {
     "libsql": "0.5.29"
@@ -41,8 +46,9 @@
     "@types/node": "22.19.7",
     "eslint": "9.25.1",
     "globals": "16.1.0",
-    "prettier": "3.6.2",
+    "prettier": "3.9.9",
     "typescript": "5.8.3",
-    "typescript-eslint": "8.31.1"
+    "typescript-eslint": "8.31.1",
+    "playwright-core": "1.56.1"
   }
 }

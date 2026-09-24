@@ -1,23 +1,16 @@
 {
-  "collection": {
-    "files": 21,
-    "added": 2324,
-    "partial": 0,
-    "failed": 0,
-    "missing": 0,
-    "pending": false,
-    "at": "2026-09-24T12:17:50.583Z"
-  },
-  "requests": 1163,
+  "status": "PASS",
+  "files": 21,
+  "nativeRequests": 1163,
   "processed": 112793144,
   "tasks": [
     {
-      "number": 3,
-      "status": "completed",
-      "requests": 530,
-      "input": 51408619,
-      "output": 96664,
-      "workers": 2,
+      "number": 1,
+      "status": "failed",
+      "requests": 434,
+      "input": 41021526,
+      "output": 93523,
+      "workers": 3,
       "reviewers": 3
     },
     {
@@ -30,12 +23,12 @@
       "reviewers": 1
     },
     {
-      "number": 1,
-      "status": "failed",
-      "requests": 434,
-      "input": 41021526,
-      "output": 93523,
-      "workers": 3,
+      "number": 3,
+      "status": "completed",
+      "requests": 530,
+      "input": 51408619,
+      "output": 96664,
+      "workers": 2,
       "reviewers": 3
     }
   ]

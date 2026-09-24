@@ -1,0 +1,30 @@
+
+> codex-report@0.0.1-dev test:browser
+> npm run build && node tools/browser-smoke.cjs
+
+
+> codex-report@0.0.1-dev build
+> tsc -p tsconfig.json
+
+(node:6808) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:6808) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{
+  "status": "PASS",
+  "mode": "offline DOM fixtures with real collector snapshot",
+  "browser": "144.0.7559.96",
+  "playwright": "1.57.0-beta-1764944708000",
+  "checks": [
+    "real collector snapshot",
+    "dashboard boot",
+    "twelve visible synthetic turns",
+    "expanded state retained",
+    "account filter",
+    "provider quota view",
+    "data health view",
+    "390px viewport without overflow",
+    "no page errors",
+    "no external requests"
+  ]
+}
