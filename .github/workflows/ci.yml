@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: npm install --global pnpm@10.11.0 --ignore-scripts --no-audit --no-fund
-      - run: pnpm install --frozen-lockfile --ignore-scripts --no-audit --no-fund
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm run verify
       - run: pnpm run audit:dependencies
       - run: pnpm run pack:local
@@ -41,7 +41,7 @@ jobs:
         with:
           node-version: '24'
       - run: npm install --global pnpm@10.11.0 --ignore-scripts --no-audit --no-fund
-      - run: pnpm install --frozen-lockfile --ignore-scripts --no-audit --no-fund
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       # System dependencies are installed only in this disposable CI runner.
       - run: pnpm exec playwright-core install --with-deps chromium
       - run: pnpm run test:browser
