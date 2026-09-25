@@ -21,6 +21,7 @@ interface Request {
 }
 interface Reply {
   id: number;
+  stopped?: boolean;
   value?: unknown;
   error?: { message: string; code?: string };
 }
@@ -122,7 +123,7 @@ export function isolatedDatabase(options: Options): Database {
       }
       throw error;
     }
-    if (op === 'close' || Atomics.load(signal, 1)) release();
+    if (op === 'close' || reply.stopped) release();
     if (reply.error) {
       const error = new Error(reply.error.message);
       if (reply.error.code) Object.assign(error, { code: reply.error.code });
@@ -175,7 +176,9 @@ function supervise(bootstrap: Bootstrap): void {
   let pending = 0;
   let terminal: Reply | undefined;
   const send = (reply: Reply, stopped = false) => {
-    port.postMessage(reply);
+    // Carry terminal state in the reply as well as the wakeup; the receiver
+    // may read the port before the following shared-state store is visible.
+    port.postMessage({ ...reply, stopped });
     if (stopped) Atomics.store(signal, 1, 1);
     Atomics.store(signal, 0, reply.id);
     Atomics.notify(signal, 0);

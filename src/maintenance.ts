@@ -237,7 +237,9 @@ export function restoreBackup(home: string, file: string): string {
     fs.copyFileSync(file, temp, fs.constants.COPYFILE_EXCL);
     inspectBackup(temp);
     if (process.platform !== 'win32') fs.chmodSync(temp, 0o600);
-    const fd = fs.openSync(temp, 'r');
+    // Windows FlushFileBuffers requires write access. Open the staging copy
+    // read/write without truncation, and retain the flush-before-rename order.
+    const fd = fs.openSync(temp, 'r+');
     try {
       fs.fsyncSync(fd);
     } finally {

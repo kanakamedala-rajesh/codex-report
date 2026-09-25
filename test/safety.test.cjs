@@ -244,23 +244,43 @@ test('read-only libsql adapter enforces query_only even when constructor ignores
   source.close();
   const Module = require('node:module');
   const { openDatabase } = require('../dist/database');
-  // A real writable connection simulates a driver that ignores constructor options.
-  // This uses either installed backend, so the test also runs on Node 18.
-  const underlying = openDatabase(path.join(home, 'usage.sqlite3')).db;
-  const original = Module._load;
+  // A real writable connection simulates a driver that ignores constructor
+  // options. Use an on-disk fixture so it also loads in the Windows worker.
   const prior = process.env.CODEX_REPORT_SQLITE_BACKEND;
+  let backendModule = 'node:sqlite';
+  if (prior !== 'builtin') {
+    try {
+      backendModule = require.resolve('libsql');
+    } catch (error) {
+      if (prior === 'libsql') throw error;
+    }
+  }
+  const trace = path.join(home, 'opened.jsonl');
+  const driver = path.join(home, 'writable-driver.cjs');
+  fs.writeFileSync(
+    driver,
+    `const fs = require('node:fs');
+const loaded = require(${JSON.stringify(backendModule)});
+const Constructor = typeof loaded === 'function' ? loaded : loaded.DatabaseSync;
+module.exports = class {
+  constructor(file) {
+    fs.appendFileSync(${JSON.stringify(trace)}, JSON.stringify(file) + '\\n');
+    return new Constructor(file, { timeout: 1500 });
+  }
+};
+`,
+  );
+  const writableDriver = require(driver);
+  const original = Module._load;
+  const resolve = Module._resolveFilename;
   process.env.CODEX_REPORT_SQLITE_BACKEND = 'libsql';
-  let opened = 0;
   Module._load = function (request, ...args) {
-    if (request === 'libsql')
-      return class {
-        constructor(file) {
-          opened++;
-          assert.equal(file, path.join(home, 'usage.sqlite3'));
-          return underlying;
-        }
-      };
+    if (request === 'libsql') return writableDriver;
     return original.call(this, request, ...args);
+  };
+  Module._resolveFilename = function (request, ...args) {
+    if (request === 'libsql') return driver;
+    return resolve.call(this, request, ...args);
   };
   try {
     const { db, backend } = openDatabase(path.join(home, 'usage.sqlite3'), true);
@@ -273,10 +293,16 @@ test('read-only libsql adapter enforces query_only even when constructor ignores
       db.close();
     }
     assert.throws(() => openDatabase(path.join(home, 'missing.sqlite3'), true), /ENOENT/);
-    assert.equal(opened, 1);
+    const opened = fs
+      .readFileSync(trace, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(opened, [path.join(home, 'usage.sqlite3')]);
     assert.equal(fs.existsSync(path.join(home, 'missing.sqlite3')), false);
   } finally {
     Module._load = original;
+    Module._resolveFilename = resolve;
     if (prior === undefined) delete process.env.CODEX_REPORT_SQLITE_BACKEND;
     else process.env.CODEX_REPORT_SQLITE_BACKEND = prior;
   }
