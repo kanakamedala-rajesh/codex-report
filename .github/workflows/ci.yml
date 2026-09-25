@@ -22,6 +22,13 @@ jobs:
       - run: npm install --global pnpm@10.11.0 --ignore-scripts --no-audit --no-fund
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm run verify
+        env:
+          CODEX_REPORT_SQLITE_BACKEND: libsql
+      - name: Check built-in SQLite explicitly
+        if: matrix.node != '18.20.8'
+        run: pnpm test
+        env:
+          CODEX_REPORT_SQLITE_BACKEND: builtin
       - run: pnpm run audit:dependencies
       - run: pnpm run pack:local
       - name: Check the older-runtime database explicitly

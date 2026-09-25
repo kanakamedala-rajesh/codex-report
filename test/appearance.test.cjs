@@ -18,6 +18,7 @@ const {
 } = require('../dist/settings');
 const { Store } = require('../dist/database');
 const { startService, rpc } = require('../dist/service');
+const { sampleSnapshot } = require('./helpers/sample-snapshot.cjs');
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-report-appearance-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -149,9 +150,7 @@ test('live font-size settings are validated, audited and retained after restart'
       },
     ],
   });
-  const preserved = store.db
-    .prepare('SELECT * FROM samples WHERE id=?')
-    .get('n:preserved-font-test');
+  const preserved = sampleSnapshot(store.db, 'n:preserved-font-test');
   store.close();
   const service = await startService(home);
   try {
@@ -184,10 +183,7 @@ test('live font-size settings are validated, audited and retained after restart'
     assert.equal(loadConfig(home).token, config.token);
     const read = new Store(home, true);
     try {
-      assert.deepEqual(
-        read.db.prepare('SELECT * FROM samples WHERE id=?').get('n:preserved-font-test'),
-        preserved,
-      );
+      assert.deepEqual(sampleSnapshot(read.db, 'n:preserved-font-test'), preserved);
       assert.equal(
         read.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action='dashboard-settings'").get()
           .n,
