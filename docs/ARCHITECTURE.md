@@ -67,3 +67,19 @@ Ship as 0.0.1-dev, with target/runtime gaps explicitly recorded. Validate the pa
 artifact, not only source tests. New state is separate from npm assets. Uninstall
 removes only managed hooks; backups and user data remain. There is no remote,
 registry publication, implicit trust grant or automatic system change.
+
+## Sessions and editable dashboard preferences
+
+Session rows reference task IDs rather than duplicating task payloads. They group
+by root thread ID, use recorded session-start timestamps, and aggregate only the
+selected samples. Raw failed statuses are preserved; a shared presentation mapper
+identifies exact usage-limit failures. Optional local session names and dashboard
+preferences are additive fields in configuration schema 1, with defaults for old
+configurations. The usage ledger schema is unchanged.
+
+The active writer handles settings updates through an allowlisted endpoint using
+an expected configuration hash. This does not add arbitrary filesystem/SQL access,
+pricing edits, source changes, or credential operations to the browser. Edits are
+validated before the config backup/write; the shared config object is refreshed
+for reports and future hook calls without restarting the collector. Default filters
+are applied on dashboard boot, not on every live data refresh.

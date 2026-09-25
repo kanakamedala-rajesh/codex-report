@@ -205,7 +205,9 @@ codex-report accounts assign premium --from-account unattributed --thread THREAD
 ```
 
 The first command previews. Apply backs up and audits the scoped correction.
-Stop the collector before changing configuration or doing maintenance.
+CLI configuration edits and maintenance require the collector to be stopped. The
+dashboard Settings page provides a separate allowlisted live-edit path; it does
+not permit source, token, port, or database changes.
 
 Display modes: `compact`, `detailed`, `quiet`. Quiet still collects. Detailed adds
 model, effort, request/tool and cache-write quantities. Terminal messages use
@@ -242,7 +244,7 @@ explicit stopped-collector sync. These bounds are not provider usage limits.
 
 ## Reports and live dashboard
 
-The dashboard has Overview, Turns & agents, Usage comparison, and Data health.
+The dashboard has Overview, Sessions, Usage comparison, Data health, and Settings.
 It polls a revision endpoint, retains filters/expanded turns, and periodically
 refreshes health even when no new requests arrive. The database is authoritative;
 there is no independently maintained JSON ledger. All assets are local.
@@ -263,6 +265,55 @@ Output files refuse overwrite. HTML exports are standalone snapshots; the live
 viewer does not need manual regeneration. CSV neutralizes formula-leading text.
 A period can contain only a slice of a long turn; timing/tool observations refer
 to recorded turns, not per-period model generation speed.
+
+## Sessions and dashboard settings
+
+See [patch details and verification](docs/SESSION-SETTINGS-PATCH.md).
+
+**Sessions** groups root turns by their stable root thread ID, including resumed
+work. A session uses its original recorded start date/time plus a short ID; turns
+keep their original within-session numbers. Search by name, ID or date, and page
+through sessions instead of discarding everything after the first 200 turns.
+Session totals cover the selected period/account/model, not an unlabelled lifetime
+sum. Linked worker/reviewer usage remains part of its root turn, not another session.
+
+Use **Name session** inside an expanded session to add an optional local nickname.
+Clear the name to return to the date/time label. The nickname is stored in this
+installation's configuration; it does not rename anything in Codex. No prompt or
+first-message text is mined for titles. Names are included in explicit JSON reports,
+not in metadata exchange archives, which do not synchronize configuration.
+
+A failed turn with the exact code `usage_limit_exceeded` displays as **Usage
+exceeded** in the dashboard and terminal reports. Other errors remain **Failed**,
+and manual cancellations remain **Interrupted**. The original persisted status and
+error code remain unchanged. JSON's `statistics.failed` retains its original inclusive
+meaning; new `usageExceeded` and `otherFailed` counts make the distinction explicit.
+CSV keeps the raw `status` column and adds `display_status` and `error`.
+
+**Settings** provides:
+
+- Dark, Light, or System theme; default page, period, account, model, and sessions
+  per page. Existing installations retain Dark unless changed explicitly.
+- Reporting timezone and Compact/Detailed/Quiet terminal receipts.
+- Per-account monthly billing start day (1-31), renewal time, optional timezone,
+  and an optional USD or local-currency fee with a manual exchange rate.
+
+The billing start is a recurring **day of the month**, not a one-time date that
+excludes older data. Leave it blank for calendar months. To view an account's
+billing cycle, select that account in the report filters; `all` is not a combined
+billing calendar. Editing billing settings never relabels or reprices prior usage.
+
+Saved theme/reporting/billing preferences apply without restarting. Default page
+and filters apply when opening the dashboard again; current filters are preserved.
+Unsaved form edits survive background refreshes. **Reload / discard edits** reloads
+current settings. Conflicting saves from two tabs are rejected rather than silently
+overwriting the other tab. Accepted changes make a private config backup and an
+audit entry. The dashboard never exposes the access token or editable source paths.
+
+Settings changes use authenticated same-origin JSON POST requests. No database schema
+migration, hook reinstallation, dependency update, or manual data reset is required.
+After installing this patched application, restart the collector once to load the
+new code and refresh the browser; subsequent settings saves are live.
 
 ## Prices
 

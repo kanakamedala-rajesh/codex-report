@@ -5,8 +5,9 @@ import crypto from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { spawn } from 'node:child_process';
 import { loadConfig, Config } from './config';
-import { object, readJson, writeJson, safeEqual, message } from './util';
+import { object, readJson, writeJson, safeEqual, message, parseJson } from './util';
 import { VERSION } from './version';
+import { SettingsError } from './settings';
 export interface Runtime {
   pid: number;
   port: number;
@@ -97,16 +98,20 @@ export async function openBrowser(url: string): Promise<void> {
     });
   });
 }
-async function body(req: http.IncomingMessage): Promise<unknown> {
+async function body(req: http.IncomingMessage, limit = 1024 * 1024): Promise<unknown> {
   const chunks: Buffer[] = [];
   let n = 0;
   for await (const item of req) {
     const b = Buffer.isBuffer(item) ? item : Buffer.from(item as string);
     n += b.length;
-    if (n > 1024 * 1024) throw new Error('Request too large.');
+    if (n > limit) throw new SettingsError('Request too large.', 413);
     chunks.push(b);
   }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+  try {
+    return parseJson(Buffer.concat(chunks).toString('utf8') || '{}');
+  } catch {
+    throw new SettingsError('Invalid JSON body.');
+  }
 }
 export interface Service {
   url: string;
@@ -149,7 +154,7 @@ export async function startService(home: string, open = false): Promise<Service>
     if (p) {
       pending.delete(id);
       clearTimeout(p.timer);
-      if (m.error) p.reject(new Error(String(m.error)));
+      if (m.error) p.reject(new SettingsError(String(m.error), Number(m.statusCode) || 500));
       else p.resolve(m.result);
     }
   });
@@ -242,10 +247,33 @@ export async function startService(home: string, open = false): Promise<Service>
               ...(Array.isArray(state.accounts) ? state.accounts : []),
               'all',
               ...new Set(config.sources.map((s) => s.account)),
-              ...Object.keys(config.accounts),
+              ...(Array.isArray(state.configuredAccounts) ? state.configuredAccounts : []),
             ],
             pollMs: config.pollMs,
           });
+          return;
+        }
+        if (url.pathname === '/api/settings') {
+          if (req.method === 'GET') {
+            json(res, 200, await call('settings'));
+            return;
+          }
+          if (req.method !== 'POST') {
+            json(res, 405, { error: 'Settings supports GET and POST only.' });
+            return;
+          }
+          // Cookies alone are not sufficient for a write. Require same-origin browser
+          // requests, or the explicit bearer used by a local client.
+          if (!internal && req.headers.origin !== `http://${req.headers.host}`) {
+            json(res, 403, { error: 'Same-origin request required to save settings.' });
+            return;
+          }
+          if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? '')) {
+            json(res, 415, { error: 'Settings writes require application/json.' });
+            return;
+          }
+          const payload = await body(req, 64 * 1024);
+          json(res, 200, await call('save-settings', payload));
           return;
         }
         if (internal && req.method === 'POST' && url.pathname === '/api/hook') {
@@ -267,7 +295,7 @@ export async function startService(home: string, open = false): Promise<Service>
         return;
       }
       if (req.method !== 'GET') {
-        json(res, 405, { error: 'Read-only dashboard.' });
+        json(res, 405, { error: 'Unsupported method.' });
         return;
       }
       const assets: Record<string, [string, string]> = {
@@ -286,7 +314,8 @@ export async function startService(home: string, open = false): Promise<Service>
       });
       res.end(fs.readFileSync(path.resolve(__dirname, '../public', asset[0])));
     })().catch((e) => {
-      if (!res.headersSent) json(res, 500, { error: message(e) });
+      if (!res.headersSent)
+        json(res, e instanceof SettingsError ? e.statusCode : 500, { error: message(e) });
       else res.destroy();
     });
   });

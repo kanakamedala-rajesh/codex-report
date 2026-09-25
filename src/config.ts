@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { object, readJson, writeJson, privateDir } from './util';
+import { object, readJson, writeJson, privateDir, clean } from './util';
 export interface Account {
   billingDay?: number;
   billingTime?: string;
@@ -18,6 +18,23 @@ export interface Source {
   account: string;
   kind: 'codex-home' | 'rollouts';
 }
+export interface DashboardPreferences {
+  theme: 'dark' | 'light' | 'system';
+  defaultView: 'overview' | 'sessions' | 'limits' | 'health';
+  defaultPeriod: 'cycle' | '5h' | 'day' | 'week' | 'lifetime';
+  defaultModel: string;
+  sessionsPerPage: 10 | 20 | 50;
+}
+export const DASHBOARD_DEFAULTS: DashboardPreferences = {
+  theme: 'dark',
+  defaultView: 'overview',
+  defaultPeriod: 'cycle',
+  defaultModel: '',
+  sessionsPerPage: 20,
+};
+export function dashboardPreferences(config: Config): DashboardPreferences {
+  return { ...DASHBOARD_DEFAULTS, ...config.dashboard };
+}
 export interface Config {
   schema: 1;
   deviceId: string;
@@ -31,6 +48,8 @@ export interface Config {
   reportAccount: string;
   priceBasis: 'standard' | 'recorded';
   maxFileMb: number;
+  dashboard?: DashboardPreferences;
+  sessionNames?: Record<string, string>;
 }
 export function validLabel(label: string): boolean {
   return (
@@ -103,6 +122,41 @@ export function validateConfig(input: unknown): Config {
         throw new Error(`Invalid ${k}.`);
     }
   }
+  if (c.dashboard !== undefined) {
+    const d = object(c.dashboard);
+    if (
+      typeof d.theme !== 'string' ||
+      !['dark', 'light', 'system'].includes(d.theme) ||
+      typeof d.defaultView !== 'string' ||
+      !['overview', 'sessions', 'limits', 'health'].includes(d.defaultView) ||
+      typeof d.defaultPeriod !== 'string' ||
+      !['cycle', '5h', 'day', 'week', 'lifetime'].includes(d.defaultPeriod) ||
+      typeof d.defaultModel !== 'string' ||
+      d.defaultModel.length > 240 ||
+      clean(d.defaultModel, 240) !== d.defaultModel ||
+      ![10, 20, 50].includes(Number(d.sessionsPerPage)) ||
+      typeof d.sessionsPerPage !== 'number'
+    )
+      throw new Error('Invalid dashboard preferences.');
+  }
+  if (c.sessionNames !== undefined) {
+    if (!c.sessionNames || typeof c.sessionNames !== 'object' || Array.isArray(c.sessionNames))
+      throw new Error('Invalid session names.');
+    const names = Object.entries(object(c.sessionNames));
+    if (names.length > 2000) throw new Error('Too many local session names.');
+    for (const [id, name] of names) {
+      if (
+        !/^[a-zA-Z0-9._-]{1,240}$/.test(id) ||
+        ['__proto__', 'constructor', 'prototype'].includes(id) ||
+        typeof name !== 'string' ||
+        !name.trim() ||
+        name.length > 120 ||
+        name !== name.trim() ||
+        clean(name, 120) !== name
+      )
+        throw new Error('Session names must be 1..120 characters on one line.');
+    }
+  }
   return c as unknown as Config;
 }
 export function loadConfig(home: string): Config {
@@ -143,6 +197,8 @@ export function initializeConfig(
     reportAccount: 'all',
     priceBasis: 'standard',
     maxFileMb: 256,
+    dashboard: { ...DASHBOARD_DEFAULTS },
+    sessionNames: {},
   };
   saveConfig(home, config);
   return config;

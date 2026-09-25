@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -17,9 +17,10 @@
       </div>
       <nav aria-label="Analytics views">
         <button data-view="overview" class="selected" aria-current="page">Overview</button>
-        <button data-view="turns">Turns &amp; agents</button>
+        <button data-view="sessions">Sessions</button>
         <button data-view="limits">Usage comparison</button>
         <button data-view="health">Data health</button>
+        <button data-view="settings">Settings</button>
       </nav>
       <div class="sidebar-foot">
         <span class="dot"></span>Local to this device
@@ -36,7 +37,7 @@
         </div>
         <div class="live" id="connection" role="status">Connecting</div>
       </header>
-      <section class="filters" aria-label="Report filters">
+      <section id="filters" class="filters" aria-label="Report filters">
         <label
           >Period<select id="period">
             <option value="cycle">Billing cycle / month</option>
@@ -59,6 +60,22 @@
         <button id="refresh" class="secondary">Refresh</button
         ><button id="download" class="secondary">Export JSON</button>
       </section>
+      <section
+        id="session-controls"
+        class="session-controls hidden"
+        aria-label="Session search and pages"
+      >
+        <label for="session-search">Find a session</label>
+        <input
+          id="session-search"
+          type="search"
+          placeholder="Name, session ID, or start date"
+          autocomplete="off"
+        />
+        <span id="sessions-count" class="fine" aria-live="polite"></span>
+        <button id="sessions-prev" class="secondary" type="button">Previous</button>
+        <button id="sessions-next" class="secondary" type="button">Next</button>
+      </section>
       <p id="period-info" class="fine"></p>
       <div id="error" class="notice hidden" role="alert"></div>
       <div id="failure" class="notice hidden" role="status"></div>
@@ -70,5 +87,21 @@
         ><span>API-equivalent estimates, not billed charges.</span>
       </footer>
     </main>
+    <dialog id="rename-dialog" aria-labelledby="rename-heading">
+      <form id="rename-form">
+        <h2 id="rename-heading">Name this session</h2>
+        <p class="note">
+          A local display name only. This does not rename the session in Codex or read its prompts.
+        </p>
+        <label for="session-name">Display name (optional)</label>
+        <input id="session-name" maxlength="120" autocomplete="off" />
+        <p class="note">Leave blank to use the session start date and time.</p>
+        <p id="rename-error" role="alert"></p>
+        <div class="form-actions">
+          <button id="rename-cancel" class="secondary" type="button">Cancel</button>
+          <button id="rename-save" class="primary" type="submit">Save name</button>
+        </div>
+      </form>
+    </dialog>
   </body>
 </html>

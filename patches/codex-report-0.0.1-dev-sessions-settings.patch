@@ -1,0 +1,3183 @@
+diff --git a/README.md b/README.md
+index 31e8f4d..3bc2689 100644
+--- a/README.md
++++ b/README.md
+@@ -190,7 +190,9 @@ codex-report accounts assign premium --from-account unattributed --thread THREAD
+ ```
+ 
+ The first command previews. Apply backs up and audits the scoped correction.
+-Stop the collector before changing configuration or doing maintenance.
++CLI configuration edits and maintenance require the collector to be stopped. The
++dashboard Settings page provides a separate allowlisted live-edit path; it does
++not permit source, token, port, or database changes.
+ 
+ Display modes: `compact`, `detailed`, `quiet`. Quiet still collects. Detailed adds
+ model, effort, request/tool and cache-write quantities. Terminal messages use
+@@ -227,7 +229,7 @@ explicit stopped-collector sync. These bounds are not provider usage limits.
+ 
+ ## Reports and live dashboard
+ 
+-The dashboard has Overview, Turns & agents, Usage comparison, and Data health.
++The dashboard has Overview, Sessions, Usage comparison, Data health, and Settings.
+ It polls a revision endpoint, retains filters/expanded turns, and periodically
+ refreshes health even when no new requests arrive. The database is authoritative;
+ there is no independently maintained JSON ledger. All assets are local.
+@@ -249,6 +251,55 @@ viewer does not need manual regeneration. CSV neutralizes formula-leading text.
+ A period can contain only a slice of a long turn; timing/tool observations refer
+ to recorded turns, not per-period model generation speed.
+ 
++## Sessions and dashboard settings
++
++See [patch details and verification](docs/SESSION-SETTINGS-PATCH.md).
++
++**Sessions** groups root turns by their stable root thread ID, including resumed
++work. A session uses its original recorded start date/time plus a short ID; turns
++keep their original within-session numbers. Search by name, ID or date, and page
++through sessions instead of discarding everything after the first 200 turns.
++Session totals cover the selected period/account/model, not an unlabelled lifetime
++sum. Linked worker/reviewer usage remains part of its root turn, not another session.
++
++Use **Name session** inside an expanded session to add an optional local nickname.
++Clear the name to return to the date/time label. The nickname is stored in this
++installation's configuration; it does not rename anything in Codex. No prompt or
++first-message text is mined for titles. Names are included in explicit JSON reports,
++not in metadata exchange archives, which do not synchronize configuration.
++
++A failed turn with the exact code `usage_limit_exceeded` displays as **Usage
++exceeded** in the dashboard and terminal reports. Other errors remain **Failed**,
++and manual cancellations remain **Interrupted**. The original persisted status and
++error code remain unchanged. JSON's `statistics.failed` retains its original inclusive
++meaning; new `usageExceeded` and `otherFailed` counts make the distinction explicit.
++CSV keeps the raw `status` column and adds `display_status` and `error`.
++
++**Settings** provides:
++
++- Dark, Light, or System theme; default page, period, account, model, and sessions
++  per page. Existing installations retain Dark unless changed explicitly.
++- Reporting timezone and Compact/Detailed/Quiet terminal receipts.
++- Per-account monthly billing start day (1-31), renewal time, optional timezone,
++  and an optional USD or local-currency fee with a manual exchange rate.
++
++The billing start is a recurring **day of the month**, not a one-time date that
++excludes older data. Leave it blank for calendar months. To view an account's
++billing cycle, select that account in the report filters; `all` is not a combined
++billing calendar. Editing billing settings never relabels or reprices prior usage.
++
++Saved theme/reporting/billing preferences apply without restarting. Default page
++and filters apply when opening the dashboard again; current filters are preserved.
++Unsaved form edits survive background refreshes. **Reload / discard edits** reloads
++current settings. Conflicting saves from two tabs are rejected rather than silently
++overwriting the other tab. Accepted changes make a private config backup and an
++audit entry. The dashboard never exposes the access token or editable source paths.
++
++Settings changes use authenticated same-origin JSON POST requests. No database schema
++migration, hook reinstallation, dependency update, or manual data reset is required.
++After installing this patched application, restart the collector once to load the
++new code and refresh the browser; subsequent settings saves are live.
++
+ ## Prices
+ 
+ The bundled table is dated **September 24, 2026** and includes five explicitly
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index b7cefe6..2082bd0 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -67,3 +67,19 @@ Ship as 0.0.1-dev, with target/runtime gaps explicitly recorded. Validate the pa
+ artifact, not only source tests. New state is separate from npm assets. Uninstall
+ removes only managed hooks; backups and user data remain. There is no remote,
+ registry publication, implicit trust grant or automatic system change.
++
++## Sessions and editable dashboard preferences
++
++Session rows reference task IDs rather than duplicating task payloads. They group
++by root thread ID, use recorded session-start timestamps, and aggregate only the
++selected samples. Raw failed statuses are preserved; a shared presentation mapper
++identifies exact usage-limit failures. Optional local session names and dashboard
++preferences are additive fields in configuration schema 1, with defaults for old
++configurations. The usage ledger schema is unchanged.
++
++The active writer handles settings updates through an allowlisted endpoint using
++an expected configuration hash. This does not add arbitrary filesystem/SQL access,
++pricing edits, source changes, or credential operations to the browser. Edits are
++validated before the config backup/write; the shared config object is refreshed
++for reports and future hook calls without restarting the collector. Default filters
++are applied on dashboard boot, not on every live data refresh.
+diff --git a/docs/SECURITY.md b/docs/SECURITY.md
+index 74f6fdb..1f8e749 100644
+--- a/docs/SECURITY.md
++++ b/docs/SECURITY.md
+@@ -10,8 +10,17 @@ prompts and tool contents; only the allowlisted metadata projection is retained.
+ - Binds to 127.0.0.1, not the LAN. The browser needs the installation's private token.
+ - A fragment-based token exchange produces an HttpOnly SameSite=Strict cookie.
+ - Host and Origin checks, CSP, fixed asset routes and size/time bounds are enforced.
+-- Browser routes are read-only. Internal hook/sync/stop operations require bearer
+-  authentication and do not accept filesystem paths from browser cookies alone.
++- Analytics routes are read-only. `GET /api/settings` returns an explicit public
++  projection, never tokens, device IDs or source paths. `POST /api/settings` can
++  change only allowlisted presentation/reporting/billing fields and local session
++  nicknames. Cookie-authenticated writes require an exact same-Origin header and
++  JSON content type; body size is capped at 64 KiB. Duplicate/unknown fields and
++  stale config revisions are rejected. The worker serializes writes, backs up the
++  private config, atomically replaces it, reloads settings, and records an audit.
++  Config and audit are separate stores: an audit failure is reported as a warning
++  after a successful config save, not misrepresented as a failed save.
++- Internal hook/sync/stop operations still require bearer authentication and do
++  not accept filesystem paths from browser cookies alone.
+ - The server does not expose the ledger, backups, configuration or raw rollouts.
+ - A malicious process already running as the same OS user can read that user's
+   private files; localhost authentication does not replace the OS trust boundary.
+diff --git a/docs/SESSION-SETTINGS-PATCH.md b/docs/SESSION-SETTINGS-PATCH.md
+new file mode 100644
+index 0000000..6221b46
+--- /dev/null
++++ b/docs/SESSION-SETTINGS-PATCH.md
+@@ -0,0 +1,146 @@
++# Sessions, settings and usage-limit presentation patch
++
++Target: `codex-report` **0.0.1-dev**. Date: September 24, 2026.
++Apply this patch **after the preceding tooling-fixes patch** for the same release.
++The original release base was `e00cc92241b9ccd980813a821f613557b563b184`.
++No package version, dependencies, lockfile, native decoder, or database schema changes.
++
++## Apply, validate and rebuild
++
++From the source repository root:
++
++```sh
++git apply --check ./codex-report-0.0.1-dev-sessions-settings.patch
++git apply ./codex-report-0.0.1-dev-sessions-settings.patch
++pnpm run verify
++pnpm run test:browser
++pnpm run pack:local
++```
++
++Run `pnpm run browser:install` first only if the matching Playwright Chromium
++binary has not already been installed. This remains a test-only prerequisite.
++The prior tooling patch supplies `pack:local`, `browser:install`, and the npm/pnpm
++resolver fixes. Review conflicts rather than forcing application over local edits.
++
++`pack:local` creates `codex-report-0.0.1-dev.tgz` in the repository root. Stop the
++running collector before installing the updated archive:
++
++```sh
++codex-report stop
++npm install -g --ignore-scripts ./codex-report-0.0.1-dev.tgz
++codex-report start --open
++```
++
++Open the new tokenized address, or the browser window opened by `--open`. An old
++browser tab may need a fresh token exchange after the server restart. Keep private
++access tokens out of screenshots and issue reports. Do not delete your database,
++run a full reset, or rerun init; existing hook definitions and data remain valid.
++
++## Sessions
++
++The navigation and page are renamed **Sessions**. Each stable root thread becomes
++one expandable session, including resumed work. Its title defaults to the recorded
++start date/time, with a short ID for disambiguation. Within-session turn numbers
++are preserved, including when a date/model/account filter hides earlier turns.
++
++Open a session to see its turns, costs, outcomes and linked workers/reviewers.
++Session totals are **for the active selection**, not automatically lifetime totals.
++A resumed session therefore retains its original start label while displaying only
++the usage in the currently selected period. Session summaries expose separate
++completed, interrupted, usage-exceeded and other-failure counts rather than claiming
++the entire reusable session is permanently finished.
++
++**Name session** adds an optional local nickname. Clear it to restore the default.
++This does not rename the Codex thread or extract any prompt text. Local names are
++stored in config and included in explicitly exported report JSON. Configuration
++is not synchronized by the metadata exchange archive.
++
++Search by name, ID, or start date. Sessions are paginated (10/20/50 per page) rather
++than discarding turns after the old 200-turn view limit. A long session initially
++shows its latest 50 turns, with an explicit control for earlier turns. Live refresh
++preserves expanded session and turn state. Mobile navigation wraps so Settings is
++not hidden offscreen.
++
++## Settings
++
++The new Settings page edits only an allowlist of relevant options:
++
++- Dark / Light / System theme, default page, period, account, model and page size.
++- Reporting timezone and Compact / Detailed / Quiet terminal receipts.
++- Per-account monthly billing start day, renewal time, optional account timezone,
++  and optional USD or local-currency subscription comparison with manual FX.
++
++Billing start means the recurring **day of the month**, not a one-time start date
++that excludes earlier records. A blank day selects calendar-month reporting.
++Choose the appropriate account in the report filter to use its billing calendar;
++`all` is deliberately not an inferred combination of several account calendars.
++None of these edits change recorded token counts, attribution or frozen prices.
++
++Save settings explicitly. Theme/reporting/billing changes apply to the running
++collector without another restart. Default page/filters apply on the next dashboard
++opening; existing report filters are not forcibly changed. Unsaved fields survive
++refresh and clicking the current Settings navigation item. Leaving with unsaved
++changes asks before discarding them. Reload/discard reloads the current config.
++
++The HTTP API returns only editable values, never tokens, device identity or source
++paths. Writes require authentication, same-Origin for browser cookies, JSON content,
++a 64 KiB body bound and an expected config revision. Stale edits return HTTP 409.
++Invalid or unknown fields are rejected before any backup/write. An accepted change
++makes a private config backup, performs an atomic config replacement and updates
++the shared worker settings. It records an audit entry without copying the submitted
++values; an audit failure after a successful save is reported explicitly as a warning.
++
++No source-path editing, port/token changes, arbitrary config replacement, price-table
++changes or database access was added to the browser. Internal hook/sync/stop routes
++remain bearer-only.
++
++## Usage-exceeded outcomes
++
++Only `status=failed` with the exact `error=usage_limit_exceeded` maps to the visible
++**Usage exceeded** label. Other errors remain Failed; manual cancellation remains
++Interrupted. No tokens or statuses are rewritten in the ledger.
++
++The common mapper is used by the dashboard, terminal receipts and human reports.
++JSON retains the raw `status`/`error` and adds `displayOutcome`. Its original
++`statistics.failed` stays inclusive for compatibility; `usageExceeded` and
++`otherFailed` provide explicit breakdowns. CSV appends `display_status` and `error`
++without changing existing column positions. Session rows reference existing task
++IDs rather than duplicating all task payloads.
++
++## Executed verification
++
++Environment: Linux x64, Node 22.16.0, npm 10.9.2, TypeScript 5.8.3,
++`@types/node` 25.1.0 available locally, built-in SQLite. Prettier 3.9.9 was loaded
++from the previously supplied upstream build, not substituted with another formatter.
++No dependency versions in your project were changed.
++
++- **105 tests passed**, no failures or skips: 66 preceding tests plus 39 new cases.
++- Strict application and browser type-checks passed.
++- Repository-wide Prettier check and Git whitespace checks passed.
++- Actual packed npm installation smoke passed in an isolated offline prefix,
++  using the enabled built-in SQLite backend.
++- Real loopback HTTP tests exercised auth, cookie/origin checks, allowed settings,
++  JSON/body limits, rejected unknown fields, concurrent stale-save conflicts,
++  live config updates, disk persistence across restart, and preserving raw samples.
++- Grouping tests cover same-numbered turns in separate sessions, resumed sessions,
++  selected-period totals, children counted once, zero-usage failures, local names,
++  exact usage-exceeded classification, and more than 200 root turns.
++- Chromium offline DOM tests passed for grouped sessions, search, local nicknames
++  rendered as text, unsaved settings preservation, saving, all three theme modes,
++  retained expansion, and desktop/mobile layouts. No external requests or page
++  errors were observed. Screenshots contain synthetic data only.
++
++The actual browser-to-loopback navigation was attempted and rejected by the host
++browser policy (`ERR_BLOCKED_BY_ADMINISTRATOR`). It was not bypassed. The DOM test
++uses synthetic responses and is **not** a live browser-to-server verification. Real
++HTTP behavior was exercised independently. The available renderer was Chromium
++144.0.7559.96 / Playwright 1.57.0-beta-1764944708000, not the project's pinned 1.56.1.
++
++`pnpm lint`/full ESLint could not run here: ESLint is not installed and the npm
++registry cannot be resolved. No lint rules were disabled or errors ignored. Run
++`pnpm run verify` with your installed dependencies. Native libSQL, exact Node 18,
++Windows/macOS/ARM64 and remote CI were not executed. Compatibility targets are
++unchanged; no target-runtime passes are implied by host tests.
++
++All original source/config/usage attachments were left unchanged. This patch does
++not publish a package, operate on your device, or include personal session records.
+diff --git a/public/app.js b/public/app.js
+index 35065ac..17097cf 100644
+--- a/public/app.js
++++ b/public/app.js
+@@ -2,6 +2,10 @@
+ 'use strict';
+ /** @typedef {import('../src/reports').Report} CodexReport */
+ /** @typedef {import('../src/reports').TaskRow} Task */
++/** @typedef {import('../src/reports').SessionRow} Session */
++/** @typedef {import('../src/settings').SettingsSnapshot} SettingsSnapshot */
++/** @typedef {import('../src/config').Account} Account */
++/** @typedef {import('../src/config').DashboardPreferences} DashboardPreferences */
+ /** @param {string} id */
+ function byId(id) {
+   const value = document.getElementById(id);
+@@ -14,6 +18,18 @@ function select(id) {
+   if (!(value instanceof HTMLSelectElement)) throw new Error('Expected select');
+   return value;
+ }
++/** @param {string} id */
++function input(id) {
++  const value = byId(id);
++  if (!(value instanceof HTMLInputElement)) throw new Error('Expected input');
++  return value;
++}
++/** @param {string} id */
++function button(id) {
++  const value = byId(id);
++  if (!(value instanceof HTMLButtonElement)) throw new Error('Expected button');
++  return value;
++}
+ /** @param {string} tag @param {string} [text] @param {string} [className] */
+ function el(tag, text = '', className = '') {
+   const n = document.createElement(tag);
+@@ -31,17 +47,170 @@ function number(n) {
+ function precise(n) {
+   return n.toLocaleString('en-US');
+ }
+-/** @param {string|null} t */
+-function date(t) {
+-  return t ? new Date(t).toLocaleString() : 'Not recorded';
++/** @param {string|null} t @param {string} [zone] */
++function date(t, zone) {
++  return t
++    ? new Date(t).toLocaleString(undefined, {
++        timeZone: zone || settingsState?.values.timezone || undefined,
++      })
++    : 'Not recorded';
+ }
+ /** @type {CodexReport|null} */
+ let current = null;
++/** @type {Map<string, Task>} */
++let taskIndex = new Map();
+ let lastRefresh = 0;
+ let view = 'overview',
+   revision = -1,
+   loading = false;
+ const expanded = new Set();
++/** @type {Map<string, boolean>} */
++const expandedSessions = new Map();
++/** @type {Map<string, number>} */
++const shownTurns = new Map();
++/** @type {SettingsSnapshot|null} */
++let settingsState = null;
++let sessionPage = 0;
++let sessionQuery = '';
++let settingsDirty = false;
++let billingDirty = false;
++let settingsSaving = false;
++let settingsDraftRevision = '';
++let billingLabel = '';
++let renameThread = '';
++let renameRevision = '';
++let renameSaving = false;
++const renameDialog = /** @type {HTMLDialogElement} */ (byId('rename-dialog'));
++/** @param {string} theme */
++function applyTheme(theme) {
++  document.documentElement.dataset.theme = theme;
++}
++/** @param {string} text */
++function showError(text) {
++  byId('error').textContent = text;
++  byId('error').classList.remove('hidden');
++}
++/** @param {string} id @param {string} value @param {string} [label] */
++function setOption(id, value, label) {
++  const node = select(id);
++  if (!Array.from(node.options).some((o) => o.value === value)) {
++    const option = document.createElement('option');
++    option.value = value;
++    option.textContent = label || value;
++    node.append(option);
++  }
++  node.value = value;
++}
++/** @param {Record<string, unknown>} changes @param {string} expectedRevision */
++async function saveSettings(changes, expectedRevision) {
++  const saved = /** @type {SettingsSnapshot & {auditWarning?: string|null}} */ (
++    await get('/api/settings', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ revision: expectedRevision, changes }),
++    })
++  );
++  settingsState = saved;
++  applyTheme(saved.values.dashboard.theme);
++  revision = -1;
++  return saved;
++}
++/** @param {Session} session */
++async function renameSession(session) {
++  if (renameDialog.open || renameSaving) return;
++  try {
++    const state = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
++    renameRevision = state.revision;
++    renameThread = session.id;
++    input('session-name').value = session.name || '';
++    byId('rename-error').textContent = '';
++    renameDialog.showModal();
++    input('session-name').focus();
++  } catch (e) {
++    showError(e instanceof Error ? e.message : String(e));
++  }
++}
++/** @param {Session} session */
++function sessionView(session) {
++  const tasks = session.turnIds
++    .map((id) => taskIndex.get(`${session.id}:${id}`))
++    .filter((t) => t !== undefined);
++  const details = document.createElement('details');
++  details.className = 'session';
++  details.dataset.session = session.id;
++  details.open = expandedSessions.get(session.id) ?? false;
++  details.addEventListener('toggle', () => {
++    if (details.isConnected) expandedSessions.set(session.id, details.open);
++  });
++  const summary = el('summary');
++  const identity = el('div', '', 'session-identity');
++  identity.append(
++    el('span', session.name || `Session ${date(session.started)}`, 'session-title'),
++    el('span', `Started ${date(session.started)} | ID ${session.id.slice(0, 8)}`, 'task-date'),
++  );
++  const counts = el('div', '', 'session-counts');
++  counts.append(
++    el('span', `${tasks.length} turn${tasks.length === 1 ? '' : 's'} in selection`, 'note'),
++  );
++  for (const [n, label, code] of [
++    [session.outcomes.completed, 'completed', 'completed'],
++    [session.outcomes.interrupted, 'interrupted', 'interrupted'],
++    [session.outcomes.usageExceeded, 'usage exceeded', 'usage-exceeded'],
++    [session.outcomes.failed, 'failed', 'failed'],
++    [session.outcomes.other, 'active / unknown', 'unknown'],
++  ])
++    if (n) counts.append(el('span', `${n} ${label}`, `badge ${code}`));
++  const cost = el('div', '', 'session-cost');
++  cost.append(
++    el(
++      'span',
++      `${session.totals.pricePico !== null ? '~' : ''}${session.totals.apiEquivalent}`,
++      'num',
++    ),
++    el(
++      'span',
++      session.totals.unpricedRequests
++        ? `${session.totals.unpricedRequests} unpriced requests`
++        : 'API-equivalent',
++      'task-date',
++    ),
++  );
++  summary.append(identity, counts, cost);
++  const body = el('div', '', 'session-body');
++  const meta = el('div', '', 'session-meta');
++  const rename = el('button', 'Name session', 'secondary');
++  rename.setAttribute('type', 'button');
++  rename.addEventListener('click', () => {
++    void renameSession(session);
++  });
++  meta.append(el('code', session.id), rename);
++  body.append(
++    meta,
++    el(
++      'p',
++      `Last activity ${date(session.lastActivity)}. Usage totals follow the selected period, account, and model.`,
++      'note',
++    ),
++  );
++  const limit = shownTurns.get(session.id) ?? 50;
++  for (const task of tasks.slice(-limit)) body.append(taskView(task));
++  if (tasks.length > limit) {
++    const more = el(
++      'button',
++      `Show ${Math.min(50, tasks.length - limit)} earlier turns`,
++      'secondary',
++    );
++    more.addEventListener('click', () => {
++      shownTurns.set(session.id, limit + 50);
++      expandedSessions.set(session.id, true);
++      if (current) render(current);
++    });
++    body.append(more);
++  }
++  details.append(summary, body);
++  return details;
++}
++
+ /** @param {string} url @param {RequestInit} [options] */
+ async function get(url, options) {
+   const response = await fetch(url, { cache: 'no-store', ...options });
+@@ -83,11 +252,11 @@ function bar(label, value, maximum, text) {
+   row.append(top, p);
+   return row;
+ }
+-/** @param {Task} task */
+-function taskView(task) {
++/** @param {Task} task @param {boolean} [showSession] */
++function taskView(task, showSession = false) {
+   const details = document.createElement('details');
+   details.className = 'task';
+-  const key = task.thread + task.turn;
++  const key = task.thread + ':' + task.turn;
+   details.open = expanded.has(key);
+   details.addEventListener('toggle', () =>
+     details.open ? expanded.add(key) : expanded.delete(key),
+@@ -96,10 +265,15 @@ function taskView(task) {
+     title = el('div'),
+     name = el('span', `Turn ${task.number ?? task.turn.slice(0, 8)}`, 'task-title');
+   title.append(name, el('span', date(task.started), 'task-date'));
++  if (showSession) title.append(el('span', `Session ${task.thread.slice(0, 8)}`, 'task-date'));
+   summary.append(
+     title,
+-    el('span', task.status, `badge ${task.status}`),
+-    el('span', `${task.totals.pricePico !== null ? '~' : ''}${task.totals.apiEquivalent}`, 'num'),
++    el('span', task.displayOutcome.label, `badge ${task.displayOutcome.code}`),
++    el(
++      'span',
++      `${task.totals.pricePico !== null ? '~' : ''}${task.totals.apiEquivalent}${task.totals.pricePico !== null && task.totals.unpricedRequests ? ' (partial)' : ''}`,
++      'num',
++    ),
+   );
+   const body = el('div', '', 'details'),
+     grid = el('div', '', 'detail-grid');
+@@ -119,7 +293,7 @@ function taskView(task) {
+   );
+   if (task.collectionPending)
+     body.append(el('p', 'Collection is catching up for this turn.', 'notice'));
+-  if (task.error) body.append(el('p', `Failure: ${task.error}`, 'notice'));
++  if (task.error) body.append(el('p', `Reason: ${task.error}`, 'notice'));
+   if (task.totals.unpricedRequests)
+     body.append(
+       el(
+@@ -137,18 +311,20 @@ function taskView(task) {
+ /** @param {CodexReport} r */
+ function render(r) {
+   current = r;
++  taskIndex = new Map(r.tasks.map((t) => [`${t.thread}:${t.turn}`, t]));
+   const content = byId('content');
++  if (view === 'settings') return;
+   content.replaceChildren();
+   const t = r.totals;
+   byId('period-info').textContent =
+-    `${r.period.label} | ${r.account} | ${r.period.from ? date(r.period.from) : 'Earliest recorded usage'} to ${r.period.to ? date(r.period.to) : 'now'}`;
++    `${r.period.label} | ${r.account} | ${r.period.from ? date(r.period.from, r.period.timezone) : 'Earliest recorded usage'} to ${r.period.to ? date(r.period.to, r.period.timezone) : 'now'} (${r.period.timezone})`;
+   byId('freshness').textContent = `Snapshot ${date(r.generatedAt)} | revision ${r.revision}`;
+   const latest = r.tasks[0],
+     failure = byId('failure');
+   failure.classList.toggle('hidden', !latest || latest.status !== 'failed');
+   failure.textContent =
+     latest?.status === 'failed'
+-      ? `Latest turn failed: ${latest.error || 'unspecified error'}. Observed usage has been retained.`
++      ? `Latest turn: ${latest.displayOutcome.label.toLowerCase()}. Reason: ${latest.error || 'unspecified error'}. Observed usage has been retained.`
+       : '';
+   if (view === 'overview') {
+     const cards = el('section', '', 'cards');
+@@ -170,7 +346,7 @@ function render(r) {
+       card(
+         'User turns',
+         String(r.statistics.tasks),
+-        `${r.statistics.completed} complete / ${r.statistics.interrupted} interrupted`,
++        `${r.statistics.completed} complete / ${r.statistics.interrupted} interrupted / ${r.statistics.usageExceeded} usage exceeded`,
+       ),
+     );
+     content.append(cards);
+@@ -200,7 +376,7 @@ function render(r) {
+       'Recent turns',
+       'Expand a turn for its requests, agents, and price coverage.',
+     );
+-    for (const task of r.tasks.slice(0, 5)) recent.append(taskView(task));
++    for (const task of r.tasks.slice(0, 5)) recent.append(taskView(task, true));
+     if (!r.tasks.length)
+       recent.append(
+         el(
+@@ -210,12 +386,34 @@ function render(r) {
+         ),
+       );
+     content.append(recent);
+-  } else if (view === 'turns') {
++  } else if (view === 'sessions') {
++    const query = sessionQuery.trim().toLocaleLowerCase();
++    const rows = r.sessions.filter((s) =>
++      [s.id, s.name || '', date(s.started)].some((v) => v.toLocaleLowerCase().includes(query)),
++    );
++    const perPage = settingsState?.values.dashboard.sessionsPerPage || 20;
++    const pages = Math.max(1, Math.ceil(rows.length / perPage));
++    sessionPage = Math.min(sessionPage, pages - 1);
++    button('sessions-prev').disabled = sessionPage === 0;
++    button('sessions-next').disabled = sessionPage >= pages - 1;
++    byId('sessions-count').textContent =
++      `${rows.length} sessions | Page ${sessionPage + 1} of ${pages}`;
+     const p = panel(
+-      'Turns & agent accounting',
+-      `${r.tasks.length} observed root turns. Displaying the latest 200; use CLI JSON export for the complete selection.`,
++      'Sessions',
++      `${r.sessions.length} sessions and ${r.tasks.length} root turns in this selection. Open a session to see its turns and linked agents.`,
+     );
+-    for (const task of r.tasks.slice(0, 200)) p.append(taskView(task));
++    for (const session of rows.slice(sessionPage * perPage, (sessionPage + 1) * perPage))
++      p.append(sessionView(session));
++    if (!rows.length)
++      p.append(
++        el(
++          'p',
++          query
++            ? 'No sessions match your search.'
++            : 'No sessions in this period. Try Recorded lifetime or run sync.',
++          'empty',
++        ),
++      );
+     content.append(p);
+   } else if (view === 'limits') {
+     const grid = el('div', '', 'grid-two'),
+@@ -301,6 +499,16 @@ async function refresh(force = false) {
+   loading = true;
+   try {
+     const status = await get('/api/status');
++    if (
++      settingsState &&
++      status.settingsRevision &&
++      status.settingsRevision !== settingsState.revision &&
++      view !== 'settings' &&
++      !renameDialog.open
++    ) {
++      settingsState = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
++      applyTheme(settingsState.values.dashboard.theme);
++    }
+     const account = select('account');
+     for (const name of status.accounts) {
+       if (!Array.from(account.options).some((o) => o.value === name)) {
+@@ -315,7 +523,8 @@ async function refresh(force = false) {
+       const model = select('model').value;
+       if (model) params.set('model', model);
+       const r = /** @type {CodexReport} */ (await get('/api/report?' + params));
+-      render(r);
++      if (view !== 'settings') render(r);
++      else current = r;
+       revision = r.revision;
+       lastRefresh = Date.now();
+       for (const m of r.models) {
+@@ -340,6 +549,415 @@ async function refresh(force = false) {
+     loading = false;
+   }
+ }
++/** @param {HTMLElement} parent @param {string} id @param {string} label @param {string} [value] @param {string} [type] */
++function inputField(parent, id, label, value = '', type = 'text') {
++  const wrap = document.createElement('label');
++  wrap.textContent = label;
++  wrap.className = 'form-field';
++  const control = document.createElement('input');
++  control.id = id;
++  control.type = type;
++  control.value = value;
++  control.autocomplete = 'off';
++  wrap.htmlFor = id;
++  wrap.append(control);
++  parent.append(wrap);
++  return control;
++}
++/** @param {HTMLElement} parent @param {string} id @param {string} label @param {string[][]} choices @param {string} value */
++function selectField(parent, id, label, choices, value) {
++  const wrap = document.createElement('label');
++  wrap.className = 'form-field';
++  wrap.textContent = label;
++  wrap.htmlFor = id;
++  const control = document.createElement('select');
++  control.id = id;
++  for (const [key, text] of choices) {
++    const option = document.createElement('option');
++    option.value = key;
++    option.textContent = text;
++    control.append(option);
++  }
++  control.value = value;
++  wrap.append(control);
++  parent.append(wrap);
++  return control;
++}
++function feeVisibility() {
++  const mode = select('billing-fee-mode').value;
++  for (const id of ['billing-usd', 'billing-local', 'billing-fx', 'billing-currency']) {
++    const node = input(id);
++    const visible = id === 'billing-usd' ? mode === 'usd' : mode === 'local';
++    node.disabled = !visible;
++    node.parentElement?.classList.toggle('hidden', !visible);
++  }
++}
++/** @param {string} label */
++function fillBilling(label) {
++  const a = settingsState?.values.accounts[label] || {};
++  for (const [id, value] of [
++    ['billing-day', a.billingDay],
++    ['billing-time', a.billingTime],
++    ['billing-zone', a.timezone],
++    ['billing-usd', a.monthlyUsd],
++    ['billing-currency', a.currency || 'INR'],
++    ['billing-local', a.subscriptionAmount],
++    ['billing-fx', a.localPerUsd],
++  ])
++    input(String(id)).value = value === undefined ? '' : String(value);
++  select('billing-fee-mode').value =
++    a.monthlyUsd !== undefined ? 'usd' : a.subscriptionAmount !== undefined ? 'local' : 'none';
++  feeVisibility();
++  billingLabel = label;
++  billingDirty = false;
++}
++function settingsView() {
++  if (!settingsState) return;
++  const state = settingsState.values;
++  settingsDraftRevision = settingsState.revision;
++  settingsDirty = false;
++  billingDirty = false;
++  const content = byId('content');
++  const form = document.createElement('form');
++  form.id = 'settings-form';
++  const appearance = panel(
++    'Appearance & defaults',
++    'Preferences are saved for this installation. Default page and filters are used when you reopen the dashboard.',
++  );
++  const fields = el('div', '', 'form-grid');
++  selectField(
++    fields,
++    'settings-theme',
++    'Theme',
++    [
++      ['dark', 'Dark'],
++      ['light', 'Light'],
++      ['system', 'System'],
++    ],
++    state.dashboard.theme,
++  );
++  selectField(
++    fields,
++    'settings-view',
++    'Default page',
++    [
++      ['overview', 'Overview'],
++      ['sessions', 'Sessions'],
++      ['limits', 'Usage comparison'],
++      ['health', 'Data health'],
++    ],
++    state.dashboard.defaultView,
++  );
++  selectField(
++    fields,
++    'settings-period',
++    'Default period',
++    [
++      ['cycle', 'Billing cycle / month'],
++      ['5h', 'Last five hours'],
++      ['day', 'Today'],
++      ['week', 'This week'],
++      ['lifetime', 'Recorded lifetime'],
++    ],
++    state.dashboard.defaultPeriod,
++  );
++  const account = inputField(
++    fields,
++    'settings-account',
++    'Default report account',
++    state.reportAccount,
++  );
++  account.required = true;
++  account.maxLength = 80;
++  account.setAttribute('list', 'settings-accounts');
++  const accounts = document.createElement('datalist');
++  accounts.id = 'settings-accounts';
++  for (const name of new Set([
++    'all',
++    'unattributed',
++    ...Object.keys(state.accounts),
++    ...Array.from(select('account').options).map((o) => o.value),
++  ])) {
++    const option = document.createElement('option');
++    option.value = name;
++    accounts.append(option);
++  }
++  fields.append(accounts);
++  const model = inputField(
++    fields,
++    'settings-model',
++    'Default model (blank = all)',
++    state.dashboard.defaultModel,
++  );
++  model.maxLength = 240;
++  selectField(
++    fields,
++    'settings-page-size',
++    'Sessions per page',
++    [
++      ['10', '10'],
++      ['20', '20'],
++      ['50', '50'],
++    ],
++    String(state.dashboard.sessionsPerPage),
++  );
++  appearance.append(fields);
++  const reporting = panel(
++    'Reporting',
++    'Changes apply to future receipts and report boundaries. Stored tokens and applied prices are not modified.',
++  );
++  const rf = el('div', '', 'form-grid');
++  const zone = inputField(rf, 'settings-timezone', 'Reporting timezone', state.timezone);
++  zone.required = true;
++  zone.maxLength = 100;
++  zone.placeholder = 'Asia/Kolkata';
++  selectField(
++    rf,
++    'settings-display',
++    'Terminal receipt detail',
++    [
++      ['compact', 'Compact'],
++      ['detailed', 'Detailed'],
++      ['quiet', 'Quiet (still collects)'],
++    ],
++    state.display,
++  );
++  reporting.append(rf);
++  const billing = panel(
++    'Billing & subscription comparison',
++    'Configure each account label separately. Labels do not change ownership of recorded usage. Select that account in report filters to view its billing cycle.',
++  );
++  const bf = el('div', '', 'form-grid');
++  const billAccount = inputField(
++    bf,
++    'billing-account',
++    'Account label to configure',
++    state.reportAccount === 'all' ? 'unattributed' : state.reportAccount,
++  );
++  billAccount.required = true;
++  billAccount.maxLength = 80;
++  billAccount.setAttribute('list', 'settings-accounts');
++  const day = inputField(
++    bf,
++    'billing-day',
++    'Monthly billing start day (blank = calendar month)',
++    '',
++    'number',
++  );
++  day.min = '1';
++  day.max = '31';
++  day.step = '1';
++  inputField(bf, 'billing-time', 'Renewal time (blank = midnight)', '', 'time');
++  const billingZone = inputField(
++    bf,
++    'billing-zone',
++    'Account timezone (blank = reporting timezone)',
++  );
++  billingZone.maxLength = 100;
++  selectField(
++    bf,
++    'billing-fee-mode',
++    'Optional fee comparison',
++    [
++      ['none', 'Disabled'],
++      ['usd', 'USD amount'],
++      ['local', 'Local currency + conversion'],
++    ],
++    'none',
++  );
++  const usd = inputField(bf, 'billing-usd', 'Monthly fee in USD', '', 'number');
++  usd.min = '0.000001';
++  usd.step = 'any';
++  const currency = inputField(bf, 'billing-currency', 'Currency code');
++  currency.maxLength = 3;
++  const local = inputField(bf, 'billing-local', 'Monthly fee in local currency', '', 'number');
++  local.min = '0.000001';
++  local.step = 'any';
++  const fx = inputField(bf, 'billing-fx', 'Local currency units per 1 USD', '', 'number');
++  fx.min = '0.000001';
++  fx.step = 'any';
++  billing.append(
++    bf,
++    el(
++      'p',
++      'Day 29-31 is clamped in shorter months without shifting the next renewal. This is a recurring day, not a filter excluding earlier history. Conversion rates are manual; no provider or currency API is contacted.',
++      'note',
++    ),
++  );
++  const actions = el('div', '', 'form-actions');
++  const save = document.createElement('button');
++  save.id = 'settings-save';
++  save.type = 'submit';
++  save.className = 'primary';
++  save.textContent = 'Save settings';
++  const reload = document.createElement('button');
++  reload.id = 'settings-reload';
++  reload.type = 'button';
++  reload.className = 'secondary';
++  reload.textContent = 'Reload / discard edits';
++  actions.append(save, reload);
++  const status = el('p', '', 'settings-message');
++  status.id = 'settings-message';
++  status.setAttribute('role', 'status');
++  form.append(appearance, reporting, billing, actions, status);
++  content.replaceChildren(form);
++  fillBilling(billAccount.value);
++  /** @param {Event} event */
++  const mark = (event) => {
++    settingsDirty = true;
++    if (
++      event.target instanceof HTMLElement &&
++      event.target.id.startsWith('billing-') &&
++      event.target.id !== 'billing-account'
++    )
++      billingDirty = true;
++    status.textContent = 'Unsaved changes';
++  };
++  form.addEventListener('input', mark);
++  form.addEventListener('change', mark);
++  billAccount.addEventListener('change', () => {
++    const label = billAccount.value.trim();
++    if (
++      billingDirty &&
++      !window.confirm('Discard the unsaved billing fields for the previous account?')
++    ) {
++      billAccount.value = billingLabel;
++      return;
++    }
++    fillBilling(label);
++  });
++  select('billing-fee-mode').addEventListener('change', feeVisibility);
++  reload.addEventListener('click', () => {
++    if (
++      settingsSaving ||
++      (settingsDirty && !window.confirm('Discard unsaved changes and reload settings?'))
++    )
++      return;
++    void get('/api/settings')
++      .then((value) => {
++        settingsState = /** @type {SettingsSnapshot} */ (value);
++        settingsView();
++      })
++      .catch((e) => {
++        status.textContent = e instanceof Error ? e.message : String(e);
++      });
++  });
++  form.addEventListener('submit', (event) => {
++    event.preventDefault();
++    if (settingsSaving) return;
++    /** @param {string} id */
++    const text = (id) => input(id).value.trim() || null;
++    /** @param {string} id */
++    const numeric = (id) => (text(id) === null ? null : Number(text(id)));
++    const mode = select('billing-fee-mode').value;
++    const label = input('billing-account').value.trim();
++    const changes = {
++      dashboard: {
++        theme: select('settings-theme').value,
++        defaultView: select('settings-view').value,
++        defaultPeriod: select('settings-period').value,
++        defaultModel: input('settings-model').value.trim(),
++        sessionsPerPage: Number(select('settings-page-size').value),
++      },
++      timezone: input('settings-timezone').value.trim(),
++      reportAccount: input('settings-account').value.trim(),
++      display: select('settings-display').value,
++      accounts: {
++        [label]: {
++          billingDay: numeric('billing-day'),
++          billingTime: text('billing-time'),
++          timezone: text('billing-zone'),
++          monthlyUsd: mode === 'usd' ? numeric('billing-usd') : null,
++          currency: mode === 'local' ? (text('billing-currency') || '').toUpperCase() : null,
++          subscriptionAmount: mode === 'local' ? numeric('billing-local') : null,
++          localPerUsd: mode === 'local' ? numeric('billing-fx') : null,
++        },
++      },
++    };
++    if (
++      (mode === 'usd' && !text('billing-usd')) ||
++      (mode === 'local' &&
++        (!text('billing-local') || !text('billing-fx') || !text('billing-currency')))
++    ) {
++      status.textContent = 'Complete the fee fields, or choose Disabled.';
++      return;
++    }
++    settingsSaving = true;
++    save.disabled = true;
++    reload.disabled = true;
++    // Freeze controls so edits made while the request is in flight cannot be silently lost.
++    const controls = [...form.querySelectorAll('input,select')];
++    const disabledBefore = controls.map((n) => n.hasAttribute('disabled'));
++    controls.forEach((n) => n.setAttribute('disabled', ''));
++    void saveSettings(changes, settingsDraftRevision)
++      .then((saved) => {
++        settingsDraftRevision = saved.revision;
++        settingsDirty = false;
++        billingDirty = false;
++        status.textContent =
++          saved.auditWarning ||
++          'Saved. Theme and reporting settings apply now. Default page and filters apply when you reopen the dashboard.';
++      })
++      .catch((e) => {
++        status.textContent = e instanceof Error ? e.message : String(e);
++      })
++      .finally(() => {
++        settingsSaving = false;
++        save.disabled = false;
++        reload.disabled = false;
++        controls.forEach((n, i) => {
++          if (!disabledBefore[i]) n.removeAttribute('disabled');
++        });
++      });
++  });
++}
++/** @param {string} next */
++async function navigate(next) {
++  if (
++    settingsSaving ||
++    (next === 'settings' && view === next && document.getElementById('settings-form'))
++  )
++    return;
++  if (
++    view === 'settings' &&
++    next !== view &&
++    settingsDirty &&
++    !window.confirm('Discard unsaved settings?')
++  )
++    return;
++  settingsDirty = false;
++  view = next;
++  /** @type {Record<string, string>} */
++  const names = {
++    overview: 'Overview',
++    sessions: 'Sessions',
++    limits: 'Usage comparison',
++    health: 'Data health',
++    settings: 'Settings',
++  };
++  byId('title').textContent = names[view] || 'Overview';
++  document.title = `${names[view] || 'Overview'} - Codex Report`;
++  for (const b of document.querySelectorAll('button[data-view]')) {
++    const active = b.getAttribute('data-view') === view;
++    b.classList.toggle('selected', active);
++    if (active) b.setAttribute('aria-current', 'page');
++    else b.removeAttribute('aria-current');
++  }
++  byId('filters').classList.toggle('hidden', view === 'settings');
++  byId('session-controls').classList.toggle('hidden', view !== 'sessions');
++  byId('period-info').classList.toggle('hidden', view === 'settings');
++  byId('failure').classList.add('hidden');
++  if (view === 'settings') {
++    byId('content').replaceChildren(el('p', 'Loading settings...', 'empty'));
++    try {
++      settingsState = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
++      if (view === 'settings') settingsView();
++    } catch (e) {
++      showError(e instanceof Error ? e.message : String(e));
++    }
++  } else if (current) render(current);
++}
++
+ async function boot() {
+   const token = new URLSearchParams(location.hash.slice(1)).get('token');
+   if (token) {
+@@ -350,19 +968,73 @@ async function boot() {
+       body: JSON.stringify({ token }),
+     });
+   }
+-  for (const button of document.querySelectorAll('button[data-view]'))
+-    button.addEventListener('click', () => {
+-      view = button.getAttribute('data-view') || 'overview';
+-      for (const b of document.querySelectorAll('button[data-view]')) {
+-        b.classList.toggle('selected', b === button);
+-        if (b === button) b.setAttribute('aria-current', 'page');
+-        else b.removeAttribute('aria-current');
+-      }
+-      byId('title').textContent = button.textContent;
+-      if (current) render(current);
++  settingsState = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
++  applyTheme(settingsState.values.dashboard.theme);
++  setOption('period', settingsState.values.dashboard.defaultPeriod);
++  setOption(
++    'account',
++    settingsState.values.reportAccount,
++    settingsState.values.reportAccount === 'all' ? 'All recorded accounts' : undefined,
++  );
++  setOption(
++    'model',
++    settingsState.values.dashboard.defaultModel,
++    settingsState.values.dashboard.defaultModel || 'All models',
++  );
++  for (const node of document.querySelectorAll('button[data-view]'))
++    node.addEventListener('click', () => {
++      void navigate(node.getAttribute('data-view') || 'overview');
+     });
++  await navigate(settingsState.values.dashboard.defaultView);
++  input('session-search').addEventListener('input', () => {
++    sessionQuery = input('session-search').value;
++    sessionPage = 0;
++    if (current) render(current);
++  });
++  button('sessions-prev').addEventListener('click', () => {
++    sessionPage = Math.max(0, sessionPage - 1);
++    if (current) render(current);
++  });
++  button('sessions-next').addEventListener('click', () => {
++    sessionPage++;
++    if (current) render(current);
++  });
++  button('rename-cancel').addEventListener('click', () => {
++    if (!renameSaving) renameDialog.close();
++  });
++  renameDialog.addEventListener('cancel', (e) => {
++    if (renameSaving) e.preventDefault();
++  });
++  byId('rename-form').addEventListener('submit', (e) => {
++    e.preventDefault();
++    if (renameSaving) return;
++    renameSaving = true;
++    button('rename-save').disabled = true;
++    void saveSettings(
++      { sessionNames: { [renameThread]: input('session-name').value.trim() || null } },
++      renameRevision,
++    )
++      .then(async () => {
++        renameDialog.close();
++        await refresh(true);
++      })
++      .catch((e) => {
++        byId('rename-error').textContent = e instanceof Error ? e.message : String(e);
++      })
++      .finally(() => {
++        renameSaving = false;
++        button('rename-save').disabled = false;
++      });
++  });
++  window.addEventListener('beforeunload', (e) => {
++    if (settingsDirty) {
++      e.preventDefault();
++      e.returnValue = '';
++    }
++  });
+   for (const id of ['period', 'account', 'model'])
+     select(id).addEventListener('change', () => {
++      sessionPage = 0;
+       void refresh(true);
+     });
+   byId('refresh').addEventListener('click', () => {
+diff --git a/public/index.html b/public/index.html
+index 253a8bc..6430824 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -1,5 +1,5 @@
+ <!doctype html>
+-<html lang="en">
++<html lang="en" data-theme="dark">
+   <head>
+     <meta charset="utf-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1" />
+@@ -17,9 +17,10 @@
+       </div>
+       <nav aria-label="Analytics views">
+         <button data-view="overview" class="selected" aria-current="page">Overview</button>
+-        <button data-view="turns">Turns &amp; agents</button>
++        <button data-view="sessions">Sessions</button>
+         <button data-view="limits">Usage comparison</button>
+         <button data-view="health">Data health</button>
++        <button data-view="settings">Settings</button>
+       </nav>
+       <div class="sidebar-foot">
+         <span class="dot"></span>Local to this device
+@@ -36,7 +37,7 @@
+         </div>
+         <div class="live" id="connection" role="status">Connecting</div>
+       </header>
+-      <section class="filters" aria-label="Report filters">
++      <section id="filters" class="filters" aria-label="Report filters">
+         <label
+           >Period<select id="period">
+             <option value="cycle">Billing cycle / month</option>
+@@ -59,6 +60,22 @@
+         <button id="refresh" class="secondary">Refresh</button
+         ><button id="download" class="secondary">Export JSON</button>
+       </section>
++      <section
++        id="session-controls"
++        class="session-controls hidden"
++        aria-label="Session search and pages"
++      >
++        <label for="session-search">Find a session</label>
++        <input
++          id="session-search"
++          type="search"
++          placeholder="Name, session ID, or start date"
++          autocomplete="off"
++        />
++        <span id="sessions-count" class="fine" aria-live="polite"></span>
++        <button id="sessions-prev" class="secondary" type="button">Previous</button>
++        <button id="sessions-next" class="secondary" type="button">Next</button>
++      </section>
+       <p id="period-info" class="fine"></p>
+       <div id="error" class="notice hidden" role="alert"></div>
+       <div id="failure" class="notice hidden" role="status"></div>
+@@ -70,5 +87,21 @@
+         ><span>API-equivalent estimates, not billed charges.</span>
+       </footer>
+     </main>
++    <dialog id="rename-dialog" aria-labelledby="rename-heading">
++      <form id="rename-form">
++        <h2 id="rename-heading">Name this session</h2>
++        <p class="note">
++          A local display name only. This does not rename the session in Codex or read its prompts.
++        </p>
++        <label for="session-name">Display name (optional)</label>
++        <input id="session-name" maxlength="120" autocomplete="off" />
++        <p class="note">Leave blank to use the session start date and time.</p>
++        <p id="rename-error" role="alert"></p>
++        <div class="form-actions">
++          <button id="rename-cancel" class="secondary" type="button">Cancel</button>
++          <button id="rename-save" class="primary" type="submit">Save name</button>
++        </div>
++      </form>
++    </dialog>
+   </body>
+ </html>
+diff --git a/public/style.css b/public/style.css
+index 397ad59..08cad02 100644
+--- a/public/style.css
++++ b/public/style.css
+@@ -1,4 +1,30 @@
+ :root {
++  color-scheme: dark;
++  --text: #e5eef2;
++  --canvas: #0b1118;
++  --sidebar: #0e1720;
++  --control-bg: #172733;
++  --control-border: #314350;
++  --hover: #243846;
++  --selected-bg: #193b36;
++  --selected-text: #a0f3d8;
++  --success-bg: #183a31;
++  --success-text: #8ce2b5;
++  --success-border: #2a5547;
++  --failure-bg: #492c2b;
++  --failure-text: #ffb6aa;
++  --failure-border: #634137;
++  --interrupt-bg: #423824;
++  --interrupt-text: #edd69a;
++  --limit-bg: #493421;
++  --limit-text: #ffc589;
++  --notice-border: #785139;
++  --notice-bg: #372a22;
++  --notice-text: #f2d1aa;
++  --track: #263543;
++  --progress: #6dc3b6;
++  --badge-bg: #263b4a;
++
+   font-family:
+     Inter,
+     ui-sans-serif,
+@@ -7,8 +33,8 @@
+     BlinkMacSystemFont,
+     'Segoe UI',
+     sans-serif;
+-  color: #e5eef2;
+-  background: #0b1118;
++  color: var(--text);
++  background: var(--canvas);
+   font-synthesis: none;
+   line-height: 1.5;
+   --muted: #91a5b8;
+@@ -33,7 +59,7 @@ button:focus-visible,
+ a:focus-visible,
+ select:focus-visible,
+ summary:focus-visible {
+-  outline: 3px solid #6ee7c4;
++  outline: 3px solid var(--accent);
+   outline-offset: 3px;
+ }
+ button {
+@@ -64,7 +90,7 @@ small,
+   inset: 0 auto 0 0;
+   border-right: 1px solid var(--border);
+   padding: 32px 20px;
+-  background: #0e1720;
++  background: var(--sidebar);
+   display: flex;
+   flex-direction: column;
+ }
+@@ -77,7 +103,7 @@ small,
+   letter-spacing: -0.5px;
+ }
+ .brand-mark {
+-  background: #173f39;
++  background: var(--selected-bg);
+   color: var(--accent);
+   font:
+     700 23px ui-monospace,
+@@ -102,21 +128,21 @@ nav button {
+   background: transparent;
+   padding: 13px 15px;
+   border-radius: 8px;
+-  color: #a9bac9;
++  color: var(--muted);
+   font-size: 14px;
+ }
+ nav button:hover {
+-  background: #162733;
++  background: var(--hover);
+ }
+ nav button.selected {
+-  background: #193b36;
+-  color: #a0f3d8;
++  background: var(--selected-bg);
++  color: var(--selected-text);
+   font-weight: 600;
+ }
+ .sidebar-foot {
+   margin-top: auto;
+   font-size: 12px;
+-  color: #b7cad6;
++  color: var(--muted);
+ }
+ .sidebar-foot p {
+   color: var(--muted);
+@@ -170,24 +196,24 @@ h3 {
+   margin: 0;
+ }
+ .live {
+-  background: #16352d;
+-  color: #8fefc4;
+-  border: 1px solid #2a5547;
++  background: var(--success-bg);
++  color: var(--success-text);
++  border: 1px solid var(--success-border);
+   border-radius: 20px;
+   font-size: 11px;
+   padding: 6px 12px;
+   white-space: nowrap;
+ }
+ .live.offline {
+-  background: #3b2825;
+-  color: #f4b6a5;
+-  border-color: #634137;
++  background: var(--failure-bg);
++  color: var(--failure-text);
++  border-color: var(--failure-border);
+ }
+ .filters {
+   display: flex;
+   align-items: end;
+   gap: 14px;
+-  background: #0f1a24;
++  background: var(--sidebar);
+   border: 1px solid var(--border);
+   padding: 16px 18px;
+   border-radius: 12px;
+@@ -205,10 +231,10 @@ h3 {
+   min-width: 150px;
+ }
+ select {
+-  border: 1px solid #314350;
++  border: 1px solid var(--control-border);
+   border-radius: 6px;
+-  background: #172733;
+-  color: #e2ebf0;
++  background: var(--control-bg);
++  color: var(--text);
+   font-size: 12px;
+   padding: 9px;
+   max-width: 100%;
+@@ -216,15 +242,15 @@ select {
+ }
+ .secondary {
+   font-size: 12px;
+-  border: 1px solid #39505b;
++  border: 1px solid var(--control-border);
+   border-radius: 6px;
+-  color: #d4e1e9;
+-  background: #17232e;
++  color: var(--text);
++  background: var(--control-bg);
+   padding: 9px 12px;
+   white-space: nowrap;
+ }
+ .secondary:hover {
+-  background: #243846;
++  background: var(--hover);
+ }
+ .fine {
+   margin: 12px 0 24px;
+@@ -290,26 +316,26 @@ select {
+ }
+ .bar-top span:first-child {
+   overflow-wrap: anywhere;
+-  color: #a9c0cf;
++  color: var(--muted);
+ }
+ progress {
+   width: 100%;
+   height: 7px;
+   border: 0;
+   border-radius: 7px;
+-  background: #263543;
++  background: var(--track);
+   appearance: none;
+ }
+ progress::-webkit-progress-bar {
+-  background: #263543;
++  background: var(--track);
+   border-radius: 7px;
+ }
+ progress::-webkit-progress-value {
+-  background: #6dc3b6;
++  background: var(--progress);
+   border-radius: 7px;
+ }
+ progress::-moz-progress-bar {
+-  background: #6dc3b6;
++  background: var(--progress);
+   border-radius: 7px;
+ }
+ .split {
+@@ -319,7 +345,7 @@ progress::-moz-progress-bar {
+ }
+ .datum {
+   padding: 14px 0;
+-  border-top: 1px solid #293a47;
++  border-top: 1px solid var(--border);
+ }
+ .datum .value {
+   font-size: 21px;
+@@ -345,11 +371,11 @@ th {
+   text-transform: uppercase;
+   letter-spacing: 0.7px;
+   padding: 12px 10px;
+-  border-bottom: 1px solid #314350;
++  border-bottom: 1px solid var(--control-border);
+ }
+ td {
+   padding: 14px 10px;
+-  border-bottom: 1px solid #263541;
++  border-bottom: 1px solid var(--border);
+   vertical-align: top;
+ }
+ tbody tr:last-child td {
+@@ -365,26 +391,26 @@ tbody tr:last-child td {
+   border-radius: 12px;
+   font-size: 10px;
+   display: inline-block;
+-  background: #263b4a;
+-  color: #bdd4e0;
++  background: var(--badge-bg);
++  color: var(--muted);
+ }
+ .badge.completed {
+-  background: #183a31;
+-  color: #8ce2b5;
++  background: var(--success-bg);
++  color: var(--success-text);
+ }
+ .badge.failed {
+-  background: #492c2b;
+-  color: #ffb6aa;
++  background: var(--failure-bg);
++  color: var(--failure-text);
+ }
+ .badge.interrupted {
+-  background: #423824;
+-  color: #edd69a;
++  background: var(--interrupt-bg);
++  color: var(--interrupt-text);
+ }
+ .task {
+   border: 1px solid var(--border);
+   border-radius: 9px;
+   margin: 10px 0;
+-  background: #121e29;
++  background: var(--panel);
+ }
+ .task summary {
+   list-style: none;
+@@ -419,14 +445,14 @@ tbody tr:last-child td {
+ .task code {
+   overflow-wrap: anywhere;
+   font-size: 11px;
+-  color: #a4b8ca;
++  color: var(--muted);
+ }
+ .notice {
+   padding: 17px 20px;
+-  border: 1px solid #785139;
++  border: 1px solid var(--notice-border);
+   border-radius: 10px;
+-  background: #372a22;
+-  color: #f2d1aa;
++  background: var(--notice-bg);
++  color: var(--notice-text);
+   font-size: 13px;
+   margin: 16px 0;
+   white-space: pre-wrap;
+@@ -437,8 +463,8 @@ tbody tr:last-child td {
+ .empty {
+   text-align: center;
+   padding: 60px 25px;
+-  background: #111e28;
+-  border: 1px dashed #34505e;
++  background: var(--panel);
++  border: 1px dashed var(--border);
+   border-radius: 12px;
+   color: var(--muted);
+ }
+@@ -470,7 +496,7 @@ pre {
+   overflow-wrap: anywhere;
+   font-size: 12px;
+   line-height: 1.8;
+-  background: #0c1720;
++  background: var(--sidebar);
+   border-radius: 8px;
+   padding: 15px;
+ }
+@@ -481,7 +507,7 @@ footer {
+   display: flex;
+   justify-content: space-between;
+   font-size: 10px;
+-  color: #8197a9;
++  color: var(--muted);
+   gap: 15px;
+ }
+ .section-space {
+@@ -528,7 +554,7 @@ footer {
+     margin-top: 18px;
+     display: flex;
+     gap: 6px;
+-    overflow: auto;
++    flex-wrap: wrap;
+   }
+   nav button {
+     font-size: 11px;
+@@ -592,3 +618,286 @@ footer {
+     font-size: 10px;
+   }
+ }
++
++:root[data-theme='light'] {
++  color-scheme: light;
++  --text: #172e3e;
++  --canvas: #f4f7fa;
++  --sidebar: #edf2f6;
++  --panel: #ffffff;
++  --muted: #4f6577;
++  --border: #cbd6df;
++  --accent: #006f5b;
++  --control-bg: #ffffff;
++  --control-border: #9aafbd;
++  --hover: #dfe9f0;
++  --selected-bg: #d2eee5;
++  --selected-text: #005541;
++  --success-bg: #d9f2e5;
++  --success-text: #17583a;
++  --success-border: #8ab9a4;
++  --failure-bg: #fbe1de;
++  --failure-text: #892d22;
++  --failure-border: #d49d95;
++  --interrupt-bg: #f3eacb;
++  --interrupt-text: #69500e;
++  --limit-bg: #ffe7cb;
++  --limit-text: #7a4100;
++  --notice-border: #c3a57a;
++  --notice-bg: #fff2de;
++  --notice-text: #69401c;
++  --track: #dbe6ed;
++  --progress: #258879;
++  --badge-bg: #e4ebf0;
++}
++@media (prefers-color-scheme: light) {
++  :root[data-theme='system'] {
++    color-scheme: light;
++    --text: #172e3e;
++    --canvas: #f4f7fa;
++    --sidebar: #edf2f6;
++    --panel: #ffffff;
++    --muted: #4f6577;
++    --border: #cbd6df;
++    --accent: #006f5b;
++    --control-bg: #ffffff;
++    --control-border: #9aafbd;
++    --hover: #dfe9f0;
++    --selected-bg: #d2eee5;
++    --selected-text: #005541;
++    --success-bg: #d9f2e5;
++    --success-text: #17583a;
++    --success-border: #8ab9a4;
++    --failure-bg: #fbe1de;
++    --failure-text: #892d22;
++    --failure-border: #d49d95;
++    --interrupt-bg: #f3eacb;
++    --interrupt-text: #69500e;
++    --limit-bg: #ffe7cb;
++    --limit-text: #7a4100;
++    --notice-border: #c3a57a;
++    --notice-bg: #fff2de;
++    --notice-text: #69401c;
++    --track: #dbe6ed;
++    --progress: #258879;
++    --badge-bg: #e4ebf0;
++  }
++}
++input {
++  font: inherit;
++  border: 1px solid var(--control-border);
++  border-radius: 6px;
++  background: var(--control-bg);
++  color: var(--text);
++  padding: 9px 11px;
++  min-width: 0;
++  max-width: 100%;
++}
++input:focus-visible {
++  outline: 3px solid var(--accent);
++  outline-offset: 3px;
++}
++button:disabled {
++  opacity: 0.5;
++  cursor: not-allowed;
++}
++.primary {
++  font: inherit;
++  font-size: 13px;
++  font-weight: 600;
++  padding: 10px 18px;
++  border-radius: 7px;
++  color: var(--selected-text);
++  background: var(--selected-bg);
++  border: 1px solid var(--accent);
++}
++.badge.usage-exceeded {
++  background: var(--limit-bg);
++  color: var(--limit-text);
++}
++.session-controls {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  flex-wrap: wrap;
++  margin-top: 20px;
++}
++.session-controls label {
++  font-size: 12px;
++  color: var(--muted);
++}
++.session-controls input {
++  flex: 1;
++  min-width: 180px;
++}
++.session-controls .fine {
++  margin: 0;
++}
++.session {
++  border: 1px solid var(--border);
++  border-radius: 10px;
++  background: var(--panel);
++  margin: 12px 0;
++}
++.session > summary {
++  list-style: none;
++  display: grid;
++  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto;
++  gap: 16px;
++  align-items: center;
++  cursor: pointer;
++  padding: 20px;
++}
++.session > summary::-webkit-details-marker {
++  display: none;
++}
++.session-title {
++  display: block;
++  font-size: 15px;
++  font-weight: 650;
++  overflow-wrap: anywhere;
++}
++.session-title::before {
++  content: '\25b8';
++  margin-right: 9px;
++  color: var(--accent);
++}
++.session[open] > summary .session-title::before {
++  content: '\25be';
++}
++.task-date {
++  display: block;
++  font-size: 11px;
++  color: var(--muted);
++  margin-top: 4px;
++}
++.session-counts {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 6px;
++}
++.session-counts .note {
++  width: 100%;
++  margin: 0;
++}
++.session-cost {
++  text-align: right;
++}
++.session-cost .num {
++  font-size: 18px;
++}
++.session-body {
++  border-top: 1px solid var(--border);
++  padding: 18px;
++}
++.session-body .task {
++  background: var(--sidebar);
++}
++.session-meta {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  margin-bottom: 12px;
++}
++.session-meta code {
++  font-size: 11px;
++  color: var(--muted);
++  overflow-wrap: anywhere;
++}
++.form-grid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 20px;
++}
++.form-field {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  font-size: 12px;
++  color: var(--muted);
++}
++.form-field input,
++.form-field select {
++  width: 100%;
++  font-size: 14px;
++}
++#settings-form {
++  display: grid;
++  gap: 20px;
++}
++#settings-form .note {
++  margin-top: 20px;
++}
++.form-actions {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 12px;
++  align-items: center;
++}
++.settings-message {
++  color: var(--accent);
++  font-size: 13px;
++  white-space: pre-wrap;
++}
++dialog {
++  max-width: min(560px, calc(100% - 32px));
++  border: 1px solid var(--border);
++  border-radius: 14px;
++  background: var(--panel);
++  color: var(--text);
++  padding: 28px;
++}
++dialog::backdrop {
++  background: rgb(0 0 0 / 60%);
++}
++dialog input {
++  display: block;
++  width: 100%;
++  margin: 10px 0;
++}
++#rename-error {
++  color: var(--failure-text);
++}
++@media (max-width: 1050px) {
++  .session > summary {
++    grid-template-columns: minmax(0, 1fr) auto;
++  }
++  .session-counts {
++    grid-column: 1 / -1;
++    grid-row: 2;
++  }
++}
++@media (max-width: 600px) {
++  .form-grid {
++    grid-template-columns: minmax(0, 1fr);
++  }
++  .session > summary {
++    padding: 14px;
++    gap: 12px;
++  }
++  .session-body {
++    padding: 10px;
++  }
++  .session-title {
++    font-size: 13px;
++  }
++  .session-cost .num {
++    font-size: 15px;
++  }
++  .session-meta {
++    align-items: flex-start;
++    flex-direction: column;
++  }
++  .session-controls input {
++    flex-basis: 100%;
++  }
++  .task summary {
++    gap: 10px;
++  }
++  .task summary .num {
++    white-space: normal;
++    overflow-wrap: anywhere;
++  }
++}
+diff --git a/src/config.ts b/src/config.ts
+index e28aaac..4e3b3b8 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -2,7 +2,7 @@ import fs from 'node:fs';
+ import path from 'node:path';
+ import os from 'node:os';
+ import crypto from 'node:crypto';
+-import { object, readJson, writeJson, privateDir } from './util';
++import { object, readJson, writeJson, privateDir, clean } from './util';
+ export interface Account {
+   billingDay?: number;
+   billingTime?: string;
+@@ -18,6 +18,23 @@ export interface Source {
+   account: string;
+   kind: 'codex-home' | 'rollouts';
+ }
++export interface DashboardPreferences {
++  theme: 'dark' | 'light' | 'system';
++  defaultView: 'overview' | 'sessions' | 'limits' | 'health';
++  defaultPeriod: 'cycle' | '5h' | 'day' | 'week' | 'lifetime';
++  defaultModel: string;
++  sessionsPerPage: 10 | 20 | 50;
++}
++export const DASHBOARD_DEFAULTS: DashboardPreferences = {
++  theme: 'dark',
++  defaultView: 'overview',
++  defaultPeriod: 'cycle',
++  defaultModel: '',
++  sessionsPerPage: 20,
++};
++export function dashboardPreferences(config: Config): DashboardPreferences {
++  return { ...DASHBOARD_DEFAULTS, ...config.dashboard };
++}
+ export interface Config {
+   schema: 1;
+   deviceId: string;
+@@ -31,6 +48,8 @@ export interface Config {
+   reportAccount: string;
+   priceBasis: 'standard' | 'recorded';
+   maxFileMb: number;
++  dashboard?: DashboardPreferences;
++  sessionNames?: Record<string, string>;
+ }
+ export function validLabel(label: string): boolean {
+   return (
+@@ -103,6 +122,41 @@ export function validateConfig(input: unknown): Config {
+         throw new Error(`Invalid ${k}.`);
+     }
+   }
++  if (c.dashboard !== undefined) {
++    const d = object(c.dashboard);
++    if (
++      typeof d.theme !== 'string' ||
++      !['dark', 'light', 'system'].includes(d.theme) ||
++      typeof d.defaultView !== 'string' ||
++      !['overview', 'sessions', 'limits', 'health'].includes(d.defaultView) ||
++      typeof d.defaultPeriod !== 'string' ||
++      !['cycle', '5h', 'day', 'week', 'lifetime'].includes(d.defaultPeriod) ||
++      typeof d.defaultModel !== 'string' ||
++      d.defaultModel.length > 240 ||
++      clean(d.defaultModel, 240) !== d.defaultModel ||
++      ![10, 20, 50].includes(Number(d.sessionsPerPage)) ||
++      typeof d.sessionsPerPage !== 'number'
++    )
++      throw new Error('Invalid dashboard preferences.');
++  }
++  if (c.sessionNames !== undefined) {
++    if (!c.sessionNames || typeof c.sessionNames !== 'object' || Array.isArray(c.sessionNames))
++      throw new Error('Invalid session names.');
++    const names = Object.entries(object(c.sessionNames));
++    if (names.length > 2000) throw new Error('Too many local session names.');
++    for (const [id, name] of names) {
++      if (
++        !/^[a-zA-Z0-9._-]{1,240}$/.test(id) ||
++        ['__proto__', 'constructor', 'prototype'].includes(id) ||
++        typeof name !== 'string' ||
++        !name.trim() ||
++        name.length > 120 ||
++        name !== name.trim() ||
++        clean(name, 120) !== name
++      )
++        throw new Error('Session names must be 1..120 characters on one line.');
++    }
++  }
+   return c as unknown as Config;
+ }
+ export function loadConfig(home: string): Config {
+@@ -143,6 +197,8 @@ export function initializeConfig(
+     reportAccount: 'all',
+     priceBasis: 'standard',
+     maxFileMb: 256,
++    dashboard: { ...DASHBOARD_DEFAULTS },
++    sessionNames: {},
+   };
+   saveConfig(home, config);
+   return config;
+diff --git a/src/outcomes.ts b/src/outcomes.ts
+new file mode 100644
+index 0000000..422fa38
+--- /dev/null
++++ b/src/outcomes.ts
+@@ -0,0 +1,20 @@
++/** Presentation is distinct from the original persisted lifecycle status. */
++export interface DisplayOutcome {
++  code: string;
++  label: string;
++}
++export function displayOutcome(status: string, error: string | null): DisplayOutcome {
++  if (status === 'failed' && error === 'usage_limit_exceeded')
++    return { code: 'usage-exceeded', label: 'Usage exceeded' };
++  const labels: Record<string, string> = {
++    running: 'Running',
++    stopping: 'Stopping point',
++    completed: 'Completed',
++    interrupted: 'Interrupted',
++    failed: 'Failed',
++    unknown: 'Unknown',
++  };
++  if (!Object.prototype.hasOwnProperty.call(labels, status))
++    return { code: 'unknown', label: 'Unknown' };
++  return { code: status, label: labels[status] ?? 'Unknown' };
++}
+diff --git a/src/reports.ts b/src/reports.ts
+index c3122db..0cf90d5 100644
+--- a/src/reports.ts
++++ b/src/reports.ts
+@@ -4,6 +4,7 @@ import { Sample, Tokens, Turn, Thread } from './types';
+ import { period, Period } from './periods';
+ import { dollars } from './pricing';
+ import { object, clean } from './util';
++import { displayOutcome, DisplayOutcome } from './outcomes';
+ export interface Filter {
+   scope?: string;
+   account?: string;
+@@ -63,6 +64,7 @@ export interface TaskRow {
+   ended: string | null;
+   durationMs: number | null;
+   status: string;
++  displayOutcome: DisplayOutcome;
+   error: string | null;
+   totals: Totals;
+   direct: Totals;
+@@ -75,6 +77,21 @@ export interface TaskRow {
+   collectionPending: boolean;
+   recordedTools: number;
+ }
++export interface SessionRow {
++  id: string;
++  name: string | null;
++  started: string;
++  lastActivity: string;
++  turnIds: string[];
++  totals: Totals;
++  outcomes: {
++    completed: number;
++    interrupted: number;
++    usageExceeded: number;
++    failed: number;
++    other: number;
++  };
++}
+ export interface Report {
+   schema: 1;
+   revision: number;
+@@ -83,6 +100,7 @@ export interface Report {
+   period: Period;
+   totals: Totals;
+   tasks: TaskRow[];
++  sessions: SessionRow[];
+   models: { name: string; totals: Totals }[];
+   days: { day: string; totals: Totals }[];
+   quotas: Record<string, unknown>[];
+@@ -93,6 +111,8 @@ export interface Report {
+     completed: number;
+     interrupted: number;
+     failed: number;
++    usageExceeded: number;
++    otherFailed: number;
+     p50Ms: number | null;
+     p95Ms: number | null;
+     averagePrice: string;
+@@ -239,6 +259,7 @@ export function report(store: Store, config: Config, f: Filter = {}): Report {
+       ended: t?.ended ?? null,
+       durationMs: t?.durationMs ?? (t?.ended ? Date.parse(t.ended) - Date.parse(t.started) : null),
+       status: t?.status ?? 'unknown',
++      displayOutcome: displayOutcome(t?.status ?? 'unknown', t?.error ?? null),
+       error: t?.error ?? null,
+       totals: totals(ss),
+       direct: totals(ss.filter((s) => s.thread === thread)),
+@@ -252,7 +273,50 @@ export function report(store: Store, config: Config, f: Filter = {}): Report {
+       recordedTools: toolCounts.get(key) ?? 0,
+     });
+   }
+-  tasks.sort((a, b) => b.started.localeCompare(a.started));
++  tasks.sort((a, b) => b.started.localeCompare(a.started) || a.turn.localeCompare(b.turn));
++  const sessionTasks = new Map<string, TaskRow[]>();
++  const sessionSamples = new Map<string, Sample[]>();
++  for (const task of tasks) {
++    const rows = sessionTasks.get(task.thread) ?? [];
++    rows.push(task);
++    sessionTasks.set(task.thread, rows);
++  }
++  for (const sample of filtered) {
++    const rows = sessionSamples.get(sample.rootThread) ?? [];
++    rows.push(sample);
++    sessionSamples.set(sample.rootThread, rows);
++  }
++  const sessions: SessionRow[] = [...sessionTasks]
++    .map(([id, rows]) => {
++      const ordered = [...rows].sort(
++        (a, b) => a.started.localeCompare(b.started) || a.turn.localeCompare(b.turn),
++      );
++      const sessionRows = sessionSamples.get(id) ?? [];
++      const started = tm.get(id)?.started || ordered[0]?.started || '';
++      const lastActivity = [
++        ...rows.map((t) => t.ended ?? t.started),
++        ...sessionRows.map((r) => r.at),
++      ].reduce((last, at) => (at > last ? at : last), started);
++      return {
++        id,
++        name: config.sessionNames?.[id] ?? null,
++        started,
++        lastActivity,
++        turnIds: ordered.map((t) => t.turn),
++        totals: totals(sessionRows),
++        outcomes: {
++          completed: rows.filter((t) => t.status === 'completed').length,
++          interrupted: rows.filter((t) => t.status === 'interrupted').length,
++          usageExceeded: rows.filter((t) => t.displayOutcome.code === 'usage-exceeded').length,
++          failed: rows.filter(
++            (t) => t.status === 'failed' && t.displayOutcome.code !== 'usage-exceeded',
++          ).length,
++          other: rows.filter((t) => !['completed', 'failed', 'interrupted'].includes(t.status))
++            .length,
++        },
++      };
++    })
++    .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity) || a.id.localeCompare(b.id));
+   const models = [...new Set(filtered.map((s) => s.model || 'unknown'))].map((name) => ({
+     name,
+     totals: totals(filtered.filter((s) => (s.model || 'unknown') === name)),
+@@ -325,6 +389,7 @@ export function report(store: Store, config: Config, f: Filter = {}): Report {
+     period: p,
+     totals: t,
+     tasks,
++    sessions,
+     models,
+     days: [...dg.entries()]
+       .sort(([a], [b]) => a.localeCompare(b))
+@@ -349,6 +414,10 @@ export function report(store: Store, config: Config, f: Filter = {}): Report {
+       completed: tasks.filter((t) => t.status === 'completed').length,
+       interrupted: tasks.filter((t) => t.status === 'interrupted').length,
+       failed: tasks.filter((t) => t.status === 'failed').length,
++      usageExceeded: tasks.filter((t) => t.displayOutcome.code === 'usage-exceeded').length,
++      otherFailed: tasks.filter(
++        (t) => t.status === 'failed' && t.displayOutcome.code !== 'usage-exceeded',
++      ).length,
+       p50Ms: percentile(0.5),
+       p95Ms: percentile(0.95),
+       averagePrice: dollars(mean),
+@@ -375,7 +444,7 @@ export function receipt(task: TaskRow, context?: Report, override?: string): str
+       ? 'interrupted by you'
+       : status === 'stopping'
+         ? 'stopping point'
+-        : status;
++        : displayOutcome(status, task.error).label.toLowerCase();
+   const rows = [
+     `Turn ${task.number ?? task.turn.slice(0, 8)} - ${title}`,
+     `Elapsed        ${duration(task.durationMs)}`,
+@@ -387,7 +456,7 @@ export function receipt(task: TaskRow, context?: Report, override?: string): str
+   ];
+   for (const [model, count] of Object.entries(task.unpriced))
+     rows.push(`Not priced     ${count} ${clean(model)} request(s)`);
+-  if (task.error) rows.push(`Failure        ${clean(task.error)}`);
++  if (task.error) rows.push(`Reason         ${clean(task.error)}`);
+   if (task.workers + task.reviewers + task.unlinked)
+     rows.push(
+       `Child work     ${task.workers} workers; ${task.reviewers} approval reviews${task.unlinked ? `; ${task.unlinked} unlinked` : ''}`,
+@@ -407,12 +476,12 @@ export function reportText(r: Report): string {
+     `Codex Report | ${r.period.label} | ${r.account}`,
+     `Input: ${r.totals.input.toLocaleString('en-US')} | Output: ${r.totals.output.toLocaleString('en-US')}`,
+     `API-equivalent: ${r.totals.apiEquivalent} | Unpriced requests: ${r.totals.unpricedRequests}`,
+-    `Tasks: ${r.statistics.tasks} | completed ${r.statistics.completed} | interrupted ${r.statistics.interrupted} | failed ${r.statistics.failed}`,
++    `Tasks: ${r.statistics.tasks} | completed ${r.statistics.completed} | interrupted ${r.statistics.interrupted} | usage exceeded ${r.statistics.usageExceeded} | other failures ${r.statistics.otherFailed}`,
+     ...r.tasks
+       .slice(0, 20)
+       .map(
+         (t) =>
+-          `  ${t.started} | ${t.number ?? '?'} ${t.status} | ${t.totals.apiEquivalent} | ${t.totals.processed.toLocaleString('en-US')} tokens`,
++          `  ${t.started} | ${t.number ?? '?'} ${t.displayOutcome.label} | ${t.totals.apiEquivalent} | ${t.totals.processed.toLocaleString('en-US')} tokens`,
+       ),
+   ].join('\n');
+ }
+@@ -445,6 +514,8 @@ export function exportReport(r: Report, format: string): string {
+           'reasoning',
+           'api_equivalent',
+           'unpriced_requests',
++          'display_status',
++          'error',
+         ],
+         ...r.tasks.map((t) => [
+           t.turn,
+@@ -457,6 +528,8 @@ export function exportReport(r: Report, format: string): string {
+           t.totals.reasoning,
+           t.totals.apiEquivalent,
+           t.totals.unpricedRequests,
++          t.displayOutcome.label,
++          t.error,
+         ]),
+       ]
+         .map((row) => row.map(cell).join(','))
+diff --git a/src/service.ts b/src/service.ts
+index 8a9c795..cde3e96 100644
+--- a/src/service.ts
++++ b/src/service.ts
+@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
+ import { Worker } from 'node:worker_threads';
+ import { spawn } from 'node:child_process';
+ import { loadConfig, Config } from './config';
+-import { object, readJson, writeJson, safeEqual, message } from './util';
++import { object, readJson, writeJson, safeEqual, message, parseJson } from './util';
++import { SettingsError } from './settings';
+ export interface Runtime {
+   pid: number;
+   port: number;
+@@ -96,16 +97,20 @@ export async function openBrowser(url: string): Promise<void> {
+     });
+   });
+ }
+-async function body(req: http.IncomingMessage): Promise<unknown> {
++async function body(req: http.IncomingMessage, limit = 1024 * 1024): Promise<unknown> {
+   const chunks: Buffer[] = [];
+   let n = 0;
+   for await (const item of req) {
+     const b = Buffer.isBuffer(item) ? item : Buffer.from(item as string);
+     n += b.length;
+-    if (n > 1024 * 1024) throw new Error('Request too large.');
++    if (n > limit) throw new SettingsError('Request too large.', 413);
+     chunks.push(b);
+   }
+-  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
++  try {
++    return parseJson(Buffer.concat(chunks).toString('utf8') || '{}');
++  } catch {
++    throw new SettingsError('Invalid JSON body.');
++  }
+ }
+ export interface Service {
+   url: string;
+@@ -148,7 +153,7 @@ export async function startService(home: string, open = false): Promise<Service>
+     if (p) {
+       pending.delete(id);
+       clearTimeout(p.timer);
+-      if (m.error) p.reject(new Error(String(m.error)));
++      if (m.error) p.reject(new SettingsError(String(m.error), Number(m.statusCode) || 500));
+       else p.resolve(m.result);
+     }
+   });
+@@ -241,12 +246,35 @@ export async function startService(home: string, open = false): Promise<Service>
+               ...(Array.isArray(state.accounts) ? state.accounts : []),
+               'all',
+               ...new Set(config.sources.map((s) => s.account)),
+-              ...Object.keys(config.accounts),
++              ...(Array.isArray(state.configuredAccounts) ? state.configuredAccounts : []),
+             ],
+             pollMs: config.pollMs,
+           });
+           return;
+         }
++        if (url.pathname === '/api/settings') {
++          if (req.method === 'GET') {
++            json(res, 200, await call('settings'));
++            return;
++          }
++          if (req.method !== 'POST') {
++            json(res, 405, { error: 'Settings supports GET and POST only.' });
++            return;
++          }
++          // Cookies alone are not sufficient for a write. Require same-origin browser
++          // requests, or the explicit bearer used by a local client.
++          if (!internal && req.headers.origin !== `http://${req.headers.host}`) {
++            json(res, 403, { error: 'Same-origin request required to save settings.' });
++            return;
++          }
++          if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? '')) {
++            json(res, 415, { error: 'Settings writes require application/json.' });
++            return;
++          }
++          const payload = await body(req, 64 * 1024);
++          json(res, 200, await call('save-settings', payload));
++          return;
++        }
+         if (internal && req.method === 'POST' && url.pathname === '/api/hook') {
+           json(res, 200, await call('hook', await body(req)));
+           return;
+@@ -266,7 +294,7 @@ export async function startService(home: string, open = false): Promise<Service>
+         return;
+       }
+       if (req.method !== 'GET') {
+-        json(res, 405, { error: 'Read-only dashboard.' });
++        json(res, 405, { error: 'Unsupported method.' });
+         return;
+       }
+       const assets: Record<string, [string, string]> = {
+@@ -285,7 +313,8 @@ export async function startService(home: string, open = false): Promise<Service>
+       });
+       res.end(fs.readFileSync(path.resolve(__dirname, '../public', asset[0])));
+     })().catch((e) => {
+-      if (!res.headersSent) json(res, 500, { error: message(e) });
++      if (!res.headersSent)
++        json(res, e instanceof SettingsError ? e.statusCode : 500, { error: message(e) });
+       else res.destroy();
+     });
+   });
+diff --git a/src/settings.ts b/src/settings.ts
+new file mode 100644
+index 0000000..5d033f3
+--- /dev/null
++++ b/src/settings.ts
+@@ -0,0 +1,168 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import crypto from 'node:crypto';
++import {
++  Account,
++  Config,
++  DashboardPreferences,
++  dashboardPreferences,
++  loadConfig,
++  saveConfig,
++  validateConfig,
++  validLabel,
++} from './config';
++import { hash, object, privateDir, exclusiveOutput } from './util';
++
++const ACCOUNT_KEYS = [
++  'billingDay',
++  'billingTime',
++  'timezone',
++  'monthlyUsd',
++  'currency',
++  'subscriptionAmount',
++  'localPerUsd',
++] as const;
++export interface EditableSettings {
++  dashboard: DashboardPreferences;
++  timezone: string;
++  reportAccount: string;
++  display: Config['display'];
++  accounts: Record<string, Account>;
++}
++export interface SettingsSnapshot {
++  revision: string;
++  values: EditableSettings;
++}
++export class SettingsError extends Error {
++  constructor(
++    message: string,
++    readonly statusCode = 400,
++  ) {
++    super(message);
++    this.name = 'SettingsError';
++  }
++}
++function strictObject(value: unknown, name: string): Record<string, unknown> {
++  if (!value || typeof value !== 'object' || Array.isArray(value))
++    throw new SettingsError(`${name} must be an object.`);
++  return object(value);
++}
++function keysOnly(value: Record<string, unknown>, allowed: readonly string[]): void {
++  for (const key of Object.keys(value))
++    if (!allowed.includes(key)) throw new SettingsError(`Setting is not editable: ${key}.`);
++}
++export function settingsRevision(config: Config): string {
++  return hash(JSON.stringify(config));
++}
++/** An explicit allowlist: never return tokens, source paths, or private device identifiers. */
++export function settingsSnapshot(config: Config): SettingsSnapshot {
++  const accounts: Record<string, Account> = Object.create(null) as Record<string, Account>;
++  for (const [label, value] of Object.entries(config.accounts)) {
++    const a: Account = {};
++    for (const key of ACCOUNT_KEYS)
++      if (value[key] !== undefined) Object.assign(a, { [key]: value[key] });
++    accounts[label] = a;
++  }
++  return {
++    revision: settingsRevision(config),
++    values: {
++      dashboard: dashboardPreferences(config),
++      timezone: config.timezone,
++      reportAccount: config.reportAccount,
++      display: config.display,
++      accounts,
++    },
++  };
++}
++/** Validates a partial update without modifying either the config or the ledger. */
++export function settingsUpdate(config: Config, input: unknown): Config {
++  const request = strictObject(input, 'Request');
++  keysOnly(request, ['revision', 'changes']);
++  if (typeof request.revision !== 'string' || request.revision !== settingsRevision(config))
++    throw new SettingsError(
++      'Settings changed in another window. Reload settings before saving.',
++      409,
++    );
++  const changes = strictObject(request.changes, 'changes');
++  keysOnly(changes, [
++    'dashboard',
++    'timezone',
++    'reportAccount',
++    'display',
++    'accounts',
++    'sessionNames',
++  ]);
++  // Clone so a rejected update cannot affect a running collector.
++  const next = JSON.parse(JSON.stringify(config)) as Config;
++  for (const key of ['timezone', 'reportAccount', 'display'] as const)
++    if (key in changes) Object.assign(next, { [key]: changes[key] });
++  if ('dashboard' in changes) {
++    const d = strictObject(changes.dashboard, 'dashboard');
++    keysOnly(d, ['theme', 'defaultView', 'defaultPeriod', 'defaultModel', 'sessionsPerPage']);
++    next.dashboard = { ...dashboardPreferences(config), ...d } as DashboardPreferences;
++  }
++  if ('accounts' in changes) {
++    const accounts = strictObject(changes.accounts, 'accounts');
++    if (Object.keys(accounts).length > 128)
++      throw new SettingsError('Too many accounts in one update.');
++    for (const [label, value] of Object.entries(accounts)) {
++      if (!validLabel(label)) throw new SettingsError('Invalid account label.');
++      const update = strictObject(value, 'Account settings');
++      keysOnly(update, ACCOUNT_KEYS);
++      const a = { ...next.accounts[label] };
++      for (const key of ACCOUNT_KEYS) {
++        if (update[key] === null) delete a[key];
++        else if (key in update) Object.assign(a, { [key]: update[key] });
++      }
++      if (a.currency !== undefined && !/^[A-Z]{3}$/.test(a.currency))
++        throw new SettingsError('Currency must be a three-letter code, such as USD or INR.');
++      if (a.timezone !== undefined && typeof a.timezone !== 'string')
++        throw new SettingsError('Account timezone must be a string.');
++      if (a.billingTime !== undefined && typeof a.billingTime !== 'string')
++        throw new SettingsError('Billing time must be a string.');
++      if (
++        a.monthlyUsd !== undefined &&
++        (a.subscriptionAmount !== undefined || a.localPerUsd !== undefined)
++      )
++        throw new SettingsError('Choose a USD fee or a local-currency fee, not both.');
++      if ((a.subscriptionAmount === undefined) !== (a.localPerUsd === undefined))
++        throw new SettingsError('Local-currency comparison needs both a fee and units per USD.');
++      next.accounts[label] = a;
++    }
++  }
++  if ('sessionNames' in changes) {
++    const names = strictObject(changes.sessionNames, 'sessionNames');
++    if (Object.keys(names).length > 1) throw new SettingsError('Rename one session at a time.');
++    next.sessionNames = { ...next.sessionNames };
++    for (const [id, name] of Object.entries(names)) {
++      if (
++        !/^[a-zA-Z0-9._-]{1,240}$/.test(id) ||
++        ['__proto__', 'constructor', 'prototype'].includes(id)
++      )
++        throw new SettingsError('Invalid session identifier.');
++      if (name === null || name === '') delete next.sessionNames[id];
++      else {
++        if (typeof name !== 'string') throw new SettingsError('Session name must be text.');
++        next.sessionNames[id] = name.trim();
++      }
++    }
++  }
++  try {
++    return validateConfig(next);
++  } catch (e) {
++    throw new SettingsError(e instanceof Error ? e.message : 'Invalid settings.');
++  }
++}
++export function saveSettings(home: string, input: unknown): Config {
++  const config = loadConfig(home);
++  const next = settingsUpdate(config, input);
++  if (settingsRevision(next) === settingsRevision(config)) return next;
++  const dir = path.join(home, 'backups');
++  privateDir(dir);
++  exclusiveOutput(
++    path.join(dir, `settings-${crypto.randomUUID()}.json`),
++    fs.readFileSync(path.join(home, 'config.json'), 'utf8'),
++  );
++  saveConfig(home, next);
++  return next;
++}
+diff --git a/src/worker.ts b/src/worker.ts
+index ee52b92..f67e22f 100644
+--- a/src/worker.ts
++++ b/src/worker.ts
+@@ -5,6 +5,7 @@ import { Collector } from './collector';
+ import { report, filter } from './reports';
+ import { handleHook, HookInput } from './hooks';
+ import { object, message } from './util';
++import { settingsSnapshot, settingsRevision, saveSettings, SettingsError } from './settings';
+ const port = parentPort;
+ if (!port) throw new Error('Collector worker requires a parent.');
+ const home = String(object(workerData).home);
+@@ -23,10 +24,31 @@ port.on('message', (raw: unknown) => {
+     try {
+       let result: unknown;
+       if (m.command === 'report') result = report(store, config, filter(m.payload));
+-      else if (m.command === 'revision')
++      else if (m.command === 'settings') result = settingsSnapshot(loadConfig(home));
++      else if (m.command === 'save-settings') {
++        const next = saveSettings(home, m.payload);
++        // Collector and hook handlers share this object; changes are immediately visible.
++        Object.assign(config, next);
++        let auditWarning: string | null = null;
++        try {
++          store.transaction(() => {
++            store.audit('dashboard-settings', {
++              fields: Object.keys(object(object(m.payload).changes)),
++            });
++            store.bump();
++          });
++        } catch {
++          // The atomic config write already succeeded. Never invite a blind duplicate retry.
++          auditWarning = 'Settings saved, but the audit entry could not be written.';
++        }
++        result = { ...settingsSnapshot(config), auditWarning };
++      } else if (m.command === 'revision')
+         result = {
+           revision: store.revision(),
+           backend: store.backend,
++          settingsRevision: settingsRevision(config),
++          reportAccount: config.reportAccount,
++          configuredAccounts: Object.keys(config.accounts),
+           accounts: store.db
+             .prepare('SELECT DISTINCT account FROM samples ORDER BY account LIMIT 1000')
+             .all()
+@@ -44,7 +66,11 @@ port.on('message', (raw: unknown) => {
+       port?.postMessage({ id: m.id, result });
+       if (stopped) port?.close();
+     } catch (e) {
+-      port?.postMessage({ id: m.id, error: message(e) });
++      port?.postMessage({
++        id: m.id,
++        error: message(e),
++        statusCode: e instanceof SettingsError ? e.statusCode : 500,
++      });
+     }
+   });
+ });
+diff --git a/test/sessions.test.cjs b/test/sessions.test.cjs
+new file mode 100644
+index 0000000..a6ff71e
+--- /dev/null
++++ b/test/sessions.test.cjs
+@@ -0,0 +1,176 @@
++'use strict';
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const { initializeConfig } = require('../dist/config');
++const { Store } = require('../dist/database');
++const { report, receipt, reportText, exportReport } = require('../dist/reports');
++const { displayOutcome } = require('../dist/outcomes');
++const { emptyBatch } = require('../dist/types');
++function setup(t) {
++  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-report-sessions-'));
++  const c = initializeConfig(home);
++  const store = new Store(home);
++  t.after(() => {
++    store.close();
++    fs.rmSync(home, { recursive: true, force: true });
++  });
++  return { c, store };
++}
++function data() {
++  const b = emptyBatch();
++  b.threads = [
++    { id: 'a', parent: null, root: 'a', kind: 'user', started: '2026-09-20T10:00:00.000Z' },
++    { id: 'b', parent: null, root: 'b', kind: 'user', started: '2026-09-24T10:00:00.000Z' },
++    { id: 'child', parent: 'a', root: 'a', kind: 'subagent', started: '2026-09-24T10:00:00.000Z' },
++  ];
++  b.turns = [
++    ['a', 'one', 'a', 'one', '2026-09-23T10:00:00.000Z', 'completed', null],
++    ['a', 'two', 'a', 'two', '2026-09-24T10:00:00.000Z', 'failed', 'usage_limit_exceeded'],
++    ['b', 'one', 'b', 'one', '2026-09-24T12:00:00.000Z', 'failed', 'provider_error'],
++    ['child', 'worker', 'a', 'two', '2026-09-24T10:00:01.000Z', 'completed', null],
++  ].map(([thread, id, rootThread, rootTurn, started, status, error]) => ({
++    thread,
++    id,
++    rootThread,
++    rootTurn,
++    started,
++    ended: started,
++    durationMs: 1000,
++    status,
++    error,
++    model: 'test-model',
++    effort: 'medium',
++    tier: 'default',
++  }));
++  b.samples = b.turns.map((t, i) => ({
++    id: 'n:' + i,
++    thread: t.thread,
++    turn: t.id,
++    rootThread: t.rootThread,
++    rootTurn: t.rootTurn,
++    at: t.started,
++    model: 'test-model',
++    effort: 'medium',
++    tier: 'default',
++    account: 'premium',
++    device: 'test-device',
++    format: 'native',
++    pricePico: i === 3 ? null : '1000000000000',
++    priceSnapshot: null,
++    priceReason: i === 3 ? 'test-unpriced' : null,
++    input: 1000,
++    output: 100,
++    cached: 500,
++    write: 0,
++    reasoning: 30,
++  }));
++  return b;
++}
++test('sessions group resumed root turns, include linked children once, and preserve distinct Turn 1s', (t) => {
++  const { store, c } = setup(t);
++  store.writeBatch(data());
++  store.writeBatch(data());
++  const r = report(store, c, { scope: 'lifetime' });
++  assert.equal(r.sessions.length, 2);
++  const a = r.sessions.find((s) => s.id === 'a');
++  const b = r.sessions.find((s) => s.id === 'b');
++  assert.equal(a.started, '2026-09-20T10:00:00.000Z');
++  assert.deepEqual(a.turnIds, ['one', 'two']);
++  assert.deepEqual(b.turnIds, ['one']);
++  assert.equal(a.totals.processed, 3300);
++  assert.equal(a.totals.unpricedRequests, 1);
++  assert.equal(
++    r.sessions.reduce((n, s) => n + s.totals.processed, 0),
++    r.totals.processed,
++  );
++  assert.equal(r.sessions[0].id, 'b', 'latest session activity first');
++  assert.equal(r.tasks.find((t) => t.thread === 'a' && t.turn === 'one').number, 1);
++  assert.equal(r.tasks.find((t) => t.thread === 'b' && t.turn === 'one').number, 1);
++});
++test('session totals follow period/account/model filters; start remains the actual session start', (t) => {
++  const { store, c } = setup(t);
++  store.writeBatch(data());
++  const r = report(store, c, {
++    from: '2026-09-24T00:00:00Z',
++    to: '2026-09-25T00:00:00Z',
++    account: 'premium',
++    model: 'test-model',
++  });
++  const a = r.sessions.find((s) => s.id === 'a');
++  assert.deepEqual(a.turnIds, ['two']);
++  assert.equal(a.totals.processed, 2200);
++  assert.equal(a.started, '2026-09-20T10:00:00.000Z');
++  assert.equal(r.tasks.find((t) => t.thread === 'a').number, 2, 'do not renumber after filtering');
++  assert.equal(report(store, c, { scope: 'lifetime', model: 'missing' }).sessions.length, 0);
++  assert.equal(report(store, c, { scope: 'lifetime', account: 'standard' }).sessions.length, 0);
++});
++test('usage exceeded is a distinct display category without changing raw lifecycle data', (t) => {
++  const { store, c } = setup(t);
++  store.writeBatch(data());
++  const r = report(store, c, { scope: 'lifetime' });
++  const task = r.tasks.find((x) => x.error === 'usage_limit_exceeded');
++  assert.equal(task.status, 'failed');
++  assert.deepEqual(task.displayOutcome, { code: 'usage-exceeded', label: 'Usage exceeded' });
++  assert.equal(r.statistics.failed, 2, 'raw API failed count remains backwards compatible');
++  assert.equal(r.statistics.usageExceeded, 1);
++  assert.equal(r.statistics.otherFailed, 1);
++  assert.equal(r.sessions.find((s) => s.id === 'a').outcomes.failed, 0);
++  assert.equal(r.sessions.find((s) => s.id === 'a').outcomes.usageExceeded, 1);
++  assert.match(receipt(task), /usage exceeded/);
++  assert.match(receipt(task), /usage_limit_exceeded/);
++  assert.match(reportText(r), /usage exceeded 1/);
++  assert.match(exportReport(r, 'csv'), /"Usage exceeded","usage_limit_exceeded"/);
++});
++test('only exact failed usage_limit_exceeded becomes usage exceeded', () => {
++  assert.equal(displayOutcome('failed', 'rate_limit_error').label, 'Failed');
++  assert.equal(displayOutcome('interrupted', 'usage_limit_exceeded').label, 'Interrupted');
++  assert.equal(displayOutcome('unknown', 'usage_limit_exceeded').label, 'Unknown');
++  assert.equal(displayOutcome('__proto__', null).label, 'Unknown');
++});
++test('local nickname is display metadata, no prompts or Codex names are inferred', (t) => {
++  const { store, c } = setup(t);
++  store.writeBatch(data());
++  c.sessionNames = { a: '<script>alert(1)</script>' };
++  const r = report(store, c, { scope: 'lifetime' });
++  assert.equal(r.sessions.find((s) => s.id === 'a').name, '<script>alert(1)</script>');
++  assert.equal(r.sessions.find((s) => s.id === 'b').name, null);
++  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM threads WHERE id='a'").get().n, 1);
++});
++test('zero-usage failed turns remain visible with unknown pricing', (t) => {
++  const { store, c } = setup(t);
++  const b = data();
++  b.samples = [];
++  store.writeBatch(b);
++  const r = report(store, c, { scope: 'lifetime' });
++  assert.equal(r.sessions.length, 2);
++  assert.equal(r.sessions[0].totals.apiEquivalent, 'unpriced');
++  assert.equal(r.statistics.usageExceeded, 1);
++});
++
++test('session membership is not truncated at the old 200-turn UI cutoff', (t) => {
++  const { store, c } = setup(t);
++  const b = data();
++  const baseTurn = b.turns[0];
++  const baseSample = b.samples[0];
++  b.threads = [b.threads[0]];
++  b.turns = Array.from({ length: 205 }, (_, i) => ({
++    ...baseTurn,
++    id: `turn-${String(i).padStart(3, '0')}`,
++    rootTurn: `turn-${String(i).padStart(3, '0')}`,
++  }));
++  b.samples = b.turns.map((turn) => ({
++    ...baseSample,
++    id: 'n:' + turn.id,
++    turn: turn.id,
++    rootTurn: turn.id,
++  }));
++  store.writeBatch(b);
++  const r = report(store, c, { scope: 'lifetime' });
++  assert.equal(r.sessions.length, 1);
++  assert.equal(r.sessions[0].turnIds.length, 205);
++  assert.equal(r.sessions[0].totals.requests, 205);
++  assert.ok(!Object.hasOwn(r.sessions[0], 'tasks'), 'do not duplicate all payloads over the wire');
++});
+diff --git a/test/settings.test.cjs b/test/settings.test.cjs
+new file mode 100644
+index 0000000..9f1fb4a
+--- /dev/null
++++ b/test/settings.test.cjs
+@@ -0,0 +1,311 @@
++'use strict';
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const os = require('node:os');
++const {
++  initializeConfig,
++  loadConfig,
++  saveConfig,
++  dashboardPreferences,
++} = require('../dist/config');
++const {
++  settingsSnapshot,
++  settingsUpdate,
++  settingsRevision,
++  saveSettings,
++} = require('../dist/settings');
++const { Store } = require('../dist/database');
++const { startService, rpc } = require('../dist/service');
++function init(t) {
++  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-report-settings-'));
++  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
++  const c = initializeConfig(home);
++  c.port = 0;
++  c.pollMs = 500;
++  c.sources = [];
++  saveConfig(home, c);
++  return { home, c };
++}
++function update(c, changes) {
++  return { revision: settingsRevision(c), changes };
++}
++
++test('old config reads with dark-compatible preferences without being rewritten', (t) => {
++  const { home, c } = init(t);
++  delete c.dashboard;
++  delete c.sessionNames;
++  saveConfig(home, c);
++  const before = fs.readFileSync(path.join(home, 'config.json'));
++  const loaded = loadConfig(home);
++  assert.equal(dashboardPreferences(loaded).theme, 'dark');
++  assert.equal(settingsSnapshot(loaded).values.dashboard.sessionsPerPage, 20);
++  assert.deepEqual(fs.readFileSync(path.join(home, 'config.json')), before);
++});
++test('browser settings projection excludes secrets, sources and device identity', (t) => {
++  const { c } = init(t);
++  c.accounts.premium = { billingDay: 6, monthlyUsd: 100, privateExtra: 'sensitive' };
++  const snapshot = settingsSnapshot(c);
++  assert.equal(snapshot.values.accounts.premium.billingDay, 6);
++  const text = JSON.stringify(snapshot);
++  for (const secret of [c.token, c.deviceId, 'sources', 'privateExtra', 'sensitive'])
++    assert.ok(!text.includes(secret));
++});
++test('settings partial merge preserves sources, price basis, other accounts and immutable fields', (t) => {
++  const { c } = init(t);
++  c.accounts.other = { billingDay: 21, monthlyUsd: 200 };
++  const next = settingsUpdate(
++    c,
++    update(c, { dashboard: { theme: 'light' }, accounts: { premium: { billingDay: 31 } } }),
++  );
++  assert.equal(next.dashboard.defaultPeriod, 'cycle');
++  assert.equal(next.accounts.other.billingDay, 21);
++  assert.equal(next.accounts.premium.billingDay, 31);
++  assert.deepEqual(next.sources, c.sources);
++  assert.equal(next.token, c.token);
++  assert.equal(next.priceBasis, c.priceBasis);
++  assert.equal(c.dashboard.theme, 'dark');
++});
++for (const [name, changes] of [
++  ['port', { port: 8000 }],
++  ['token', { token: 'bad' }],
++  ['sources', { sources: [] }],
++  ['price basis', { priceBasis: 'recorded' }],
++  ['unknown', { unexpected: true }],
++  ['theme', { dashboard: { theme: 'blue' } }],
++  ['theme array', { dashboard: { theme: ['dark'] } }],
++  ['page', { dashboard: { defaultView: 'invalid' } }],
++  ['period', { dashboard: { defaultPeriod: 'hour' } }],
++  ['page size', { dashboard: { sessionsPerPage: 1000000 } }],
++  ['page string', { dashboard: { sessionsPerPage: '20' } }],
++  ['model control', { dashboard: { defaultModel: 'model\u0000' } }],
++  ['timezone', { timezone: 'No/Such_Zone' }],
++  ['mode', { display: 'noisy' }],
++  ['billing day', { accounts: { premium: { billingDay: 0 } } }],
++  ['billing time', { accounts: { premium: { billingTime: '25:90' } } }],
++  ['billing zone type', { accounts: { premium: { timezone: [] } } }],
++  ['negative fee', { accounts: { premium: { monthlyUsd: -1 } } }],
++  [
++    'ambiguous fee',
++    { accounts: { premium: { monthlyUsd: 100, subscriptionAmount: 100, localPerUsd: 1 } } },
++  ],
++  ['missing conversion', { accounts: { premium: { subscriptionAmount: 100 } } }],
++  ['bad currency', { accounts: { premium: { currency: 'usd' } } }],
++  ['protected account', { accounts: { all: { billingDay: 5 } } }],
++  ['private account field', { accounts: { premium: { token: 'x' } } }],
++])
++  test(`invalid ${name} rejected without changing config`, (t) => {
++    const { home, c } = init(t);
++    const before = fs.readFileSync(path.join(home, 'config.json'));
++    assert.throws(() => saveSettings(home, update(c, changes)));
++    assert.deepEqual(fs.readFileSync(path.join(home, 'config.json')), before);
++    assert.equal(fs.existsSync(path.join(home, 'backups')), false);
++  });
++test('prototype keys are rejected, never merged', (t) => {
++  const { c } = init(t);
++  const attack = JSON.parse('{"accounts":{"__proto__":{"monthlyUsd":100}}}');
++  assert.throws(() => settingsUpdate(c, update(c, attack)), /label/);
++  assert.equal({}.monthlyUsd, undefined);
++});
++test('settings write is backed up, repeat no-op creates no extra backup, stale revision conflicts', (t) => {
++  const { home, c } = init(t);
++  const before = fs.readFileSync(path.join(home, 'config.json'));
++  const next = saveSettings(
++    home,
++    update(c, { timezone: 'Asia/Kolkata', dashboard: { theme: 'system' } }),
++  );
++  const backups = fs.readdirSync(path.join(home, 'backups'));
++  assert.equal(backups.length, 1);
++  assert.deepEqual(fs.readFileSync(path.join(home, 'backups', backups[0])), before);
++  assert.equal(loadConfig(home).timezone, 'Asia/Kolkata');
++  saveSettings(home, update(next, { timezone: 'Asia/Kolkata' }));
++  assert.equal(fs.readdirSync(path.join(home, 'backups')).length, 1);
++  assert.throws(
++    () => saveSettings(home, update(c, { timezone: 'UTC' })),
++    (e) => e.statusCode === 409,
++  );
++});
++test('clearing billing removes only selected values and preserves another account', (t) => {
++  const { c } = init(t);
++  c.accounts.premium = { billingDay: 6, monthlyUsd: 100, timezone: 'Asia/Kolkata' };
++  c.accounts.standard = { billingDay: 21 };
++  const next = settingsUpdate(
++    c,
++    update(c, { accounts: { premium: { billingDay: null, monthlyUsd: null } } }),
++  );
++  assert.deepEqual(next.accounts.premium, { timezone: 'Asia/Kolkata' });
++  assert.deepEqual(next.accounts.standard, { billingDay: 21 });
++});
++test('local session name can be cleared without altering the underlying session', (t) => {
++  const { c } = init(t);
++  const next = settingsUpdate(
++    c,
++    update(c, { sessionNames: { 'thread-1': '  Work on dashboard  ' } }),
++  );
++  assert.equal(next.sessionNames['thread-1'], 'Work on dashboard');
++  assert.deepEqual(
++    settingsUpdate(next, update(next, { sessionNames: { 'thread-1': null } })).sessionNames,
++    {},
++  );
++  assert.throws(() => settingsUpdate(c, update(c, { sessionNames: { 'thread-1': 'a\nb' } })));
++  assert.throws(() =>
++    settingsUpdate(c, update(c, { sessionNames: { 'thread-1': 'x'.repeat(121) } })),
++  );
++});
++
++test('live settings endpoint protects writes, rejects conflicts, and hot-reloads billing/reporting', async (t) => {
++  const { home, c } = init(t);
++  const store = new Store(home);
++  store.close();
++  const service = await startService(home);
++  try {
++    const base = service.url.split('/#')[0];
++    assert.equal((await fetch(base + '/api/settings')).status, 401);
++    const auth = await fetch(base + '/api/session', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ token: c.token }),
++    });
++    const cookie = auth.headers.get('set-cookie').split(';')[0];
++    const getSettings = async () =>
++      (await fetch(base + '/api/settings', { headers: { Cookie: cookie } })).json();
++    const initial = await getSettings();
++    const post = (payload, extra = {}, method = 'POST') =>
++      fetch(base + '/api/settings', {
++        method,
++        headers: { Cookie: cookie, 'Content-Type': 'application/json', Origin: base, ...extra },
++        body: typeof payload === 'string' ? payload : JSON.stringify(payload),
++      });
++    const body = { revision: initial.revision, changes: { dashboard: { theme: 'light' } } };
++    assert.equal((await post(body, { Origin: 'https://evil.example' })).status, 403);
++    assert.equal(
++      (
++        await fetch(base + '/api/settings', {
++          method: 'POST',
++          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
++          body: JSON.stringify(body),
++        })
++      ).status,
++      403,
++      'cookie writes without Origin rejected',
++    );
++    assert.equal((await post(body, { 'Content-Type': 'text/plain' })).status, 415);
++    assert.equal((await post('{"revision":"x","revision":"y","changes":{}}')).status, 400);
++    assert.equal((await post({ revision: initial.revision, changes: { port: 10 } })).status, 400);
++    assert.equal((await post(body, {}, 'PUT')).status, 405);
++    assert.equal(
++      (
++        await post({
++          revision: initial.revision,
++          changes: { dashboard: { defaultModel: 'x'.repeat(66000) } },
++        })
++      ).status,
++      413,
++    );
++    const responses = await Promise.all([post(body), post(body)]);
++    assert.deepEqual(responses.map((r) => r.status).sort(), [200, 409]);
++    const after = await getSettings();
++    assert.equal(after.values.dashboard.theme, 'light');
++    assert.equal(after.values.accounts.premium, undefined);
++    const saved = await post({
++      revision: after.revision,
++      changes: {
++        timezone: 'Asia/Kolkata',
++        reportAccount: 'premium',
++        display: 'detailed',
++        accounts: { premium: { billingDay: 31, timezone: 'Asia/Kolkata', monthlyUsd: 100 } },
++      },
++    });
++    assert.equal(saved.status, 200);
++    const live = await rpc(home, '/api/report');
++    assert.equal(live.account, 'premium');
++    assert.equal(live.period.label, 'billing cycle');
++    assert.equal(live.period.timezone, 'Asia/Kolkata');
++    assert.ok((await rpc(home, '/api/status')).accounts.includes('premium'));
++    assert.equal(loadConfig(home).display, 'detailed');
++    assert.equal(loadConfig(home).token, c.token);
++    const readStore = new Store(home, true);
++    try {
++      assert.equal(readStore.db.prepare('SELECT COUNT(*) AS n FROM samples').get().n, 0);
++      assert.equal(
++        readStore.db
++          .prepare("SELECT COUNT(*) AS n FROM audit WHERE action='dashboard-settings'")
++          .get().n,
++        2,
++      );
++    } finally {
++      readStore.close();
++    }
++    assert.equal((await fetch(base + '/config.json', { headers: { Cookie: cookie } })).status, 404);
++    const settingsText = JSON.stringify(await getSettings());
++    assert.ok(!settingsText.includes(c.token));
++    assert.ok(!settingsText.includes(home));
++  } finally {
++    await service.close();
++  }
++  const restarted = await startService(home);
++  try {
++    assert.equal((await rpc(home, '/api/settings')).values.dashboard.theme, 'light');
++  } finally {
++    await restarted.close();
++  }
++});
++
++test('live preferences and fee changes preserve recorded tokens, prices, and ownership', async (t) => {
++  const { home, c } = init(t);
++  const store = new Store(home);
++  const sample = {
++    id: 'n:keep',
++    thread: 'root',
++    turn: 'turn',
++    rootThread: 'root',
++    rootTurn: 'turn',
++    at: '2026-09-24T10:00:00.000Z',
++    model: 'frozen-price-model',
++    effort: 'medium',
++    tier: 'default',
++    account: 'unattributed',
++    device: 'fixture',
++    format: 'native',
++    input: 100,
++    output: 10,
++    cached: 50,
++    write: 0,
++    reasoning: 3,
++    pricePico: '1234500000000',
++    priceSnapshot: '{"source":"frozen"}',
++    priceReason: null,
++  };
++  store.writeBatch({
++    threads: [],
++    turns: [],
++    quotas: [],
++    issues: [],
++    tools: [],
++    samples: [sample],
++  });
++  const before = store.db.prepare('SELECT * FROM samples WHERE id=?').get('n:keep');
++  store.close();
++  const service = await startService(home);
++  try {
++    const state = await rpc(home, '/api/settings');
++    await rpc(home, '/api/settings', {
++      revision: state.revision,
++      changes: {
++        accounts: { premium: { billingDay: 6, monthlyUsd: 150 } },
++        reportAccount: 'premium',
++        sessionNames: { root: 'Reporting work' },
++      },
++    });
++    const read = new Store(home, true);
++    try {
++      assert.deepEqual(read.db.prepare('SELECT * FROM samples WHERE id=?').get('n:keep'), before);
++    } finally {
++      read.close();
++    }
++    assert.equal(loadConfig(home).token, c.token);
++  } finally {
++    await service.close();
++  }
++});
+diff --git a/tools/browser-smoke.cjs b/tools/browser-smoke.cjs
+index 02bfbe9..9a89e2c 100644
+--- a/tools/browser-smoke.cjs
++++ b/tools/browser-smoke.cjs
+@@ -82,6 +82,18 @@ content += line(
+   new Date().toISOString(),
+ );
+ fs.writeFileSync(file, content);
++// A second root session deliberately has its own Turn 1.
++const secondAt = new Date(Date.now() - 3600000).toISOString();
++fs.writeFileSync(
++  path.join(source, 'second.jsonl'),
++  line(
++    'session_meta',
++    { id: 'second-thread', session_id: 'second-thread', source: 'cli' },
++    secondAt,
++  ) +
++    line('event_msg', { type: 'task_started', turn_id: 'another-turn' }, secondAt) +
++    line('event_msg', { type: 'turn_aborted', turn_id: 'another-turn' }, secondAt),
++);
+ const store = new Store(temp);
+ store.close();
+ let browser, service;
+@@ -102,7 +114,7 @@ async function main() {
+     let snapshot;
+     for (let n = 0; n < 30; n++) {
+       snapshot = await rpc(temp, '/api/report?scope=lifetime');
+-      if (snapshot.tasks.length === 12) break;
++      if (snapshot.tasks.length === 13) break;
+       await new Promise((r) => setTimeout(r, 100));
+     }
+     await page.setContent(
+@@ -114,17 +126,44 @@ async function main() {
+     await page.addStyleTag({
+       content: fs.readFileSync(path.join(__dirname, '../public/style.css'), 'utf8'),
+     });
+-    await page.evaluate((snapshot) => {
+-      window.fetch = async (url) =>
+-        new Response(
+-          JSON.stringify(
+-            String(url).includes('/api/status')
+-              ? { revision: snapshot.revision, accounts: ['all', 'demo'] }
+-              : snapshot,
+-          ),
+-          { status: 200, headers: { 'Content-Type': 'application/json' } },
+-        );
+-    }, snapshot);
++    const settings = await rpc(temp, '/api/settings');
++    await page.evaluate(
++      ({ snapshot, settings }) => {
++        let revision = 0;
++        const data = structuredClone(snapshot);
++        const prefs = structuredClone(settings);
++        // This branch only exercises DOM behavior with synthetic responses.
++        // Real auth, validation, persistence and conflicts have HTTP integration tests.
++        window.fetch = async (url, options) => {
++          let result;
++          if (String(url).includes('/api/settings')) {
++            if (options?.method === 'POST') {
++              const changes = JSON.parse(options.body).changes;
++              if (changes.dashboard) Object.assign(prefs.values.dashboard, changes.dashboard);
++              for (const key of ['timezone', 'display', 'reportAccount'])
++                if (key in changes) prefs.values[key] = changes[key];
++              if (changes.accounts) Object.assign(prefs.values.accounts, changes.accounts);
++              if (changes.sessionNames)
++                for (const [id, name] of Object.entries(changes.sessionNames))
++                  data.sessions.find((s) => s.id === id).name = name;
++              prefs.revision = 'fixture-' + ++revision;
++            }
++            result = prefs;
++          } else if (String(url).includes('/api/status'))
++            result = {
++              revision: data.revision + revision,
++              settingsRevision: prefs.revision,
++              accounts: ['all', 'demo'],
++            };
++          else result = data;
++          return new Response(JSON.stringify(result), {
++            status: 200,
++            headers: { 'Content-Type': 'application/json' },
++          });
++        };
++      },
++      { snapshot, settings },
++    );
+     await page.addScriptTag({
+       content: fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8'),
+     });
+@@ -137,11 +176,38 @@ async function main() {
+   const out = process.env.CODEX_REPORT_SCREENSHOTS;
+   if (out) fs.mkdirSync(out, { recursive: true });
+   if (out) await page.screenshot({ path: path.join(out, 'dashboard-desktop.png'), fullPage: true });
+-  await page.click('button[data-view="turns"]');
+-  assert.equal(await page.locator('details.task').count(), 12);
+-  await page.locator('details.task summary').first().click();
++  await page.click('button[data-view="sessions"]');
++  assert.equal(await page.locator('details.session').count(), 2);
++  await page.evaluate(() => window.scrollTo(0, 0));
++  if (out)
++    await page.screenshot({ path: path.join(out, 'dashboard-sessions.png'), fullPage: true });
++  const mainSession = page.locator('details.session[data-session="demo-thread"]');
++  await mainSession.locator(':scope > summary').click();
++  assert.equal(await mainSession.locator('details.task').count(), 12);
++  assert.ok((await mainSession.textContent()).includes('Usage exceeded'));
++  await mainSession.locator('details.task summary').first().click();
+   await page.waitForTimeout(2200);
+-  assert.equal(await page.locator('details.task').first().getAttribute('open'), '');
++  assert.equal(await mainSession.getAttribute('open'), '');
++  assert.equal(await mainSession.locator('details.task').first().getAttribute('open'), '');
++  await mainSession.getByRole('button', { name: 'Name session' }).click();
++  await page.fill('#session-name', '<img src=x onerror=alert(1)>');
++  await page.click('#rename-save');
++  await page.waitForFunction(() => !document.getElementById('rename-dialog').open);
++  await page.waitForFunction(() =>
++    document
++      .querySelector('.session[data-session="demo-thread"] .session-title')
++      .textContent.includes('<img'),
++  );
++  assert.equal(await mainSession.locator('img').count(), 0, 'name rendered as text, never markup');
++  await mainSession.getByRole('button', { name: 'Name session' }).click();
++  await page.fill('#session-name', 'Usage collector refinements');
++  await page.click('#rename-save');
++  await page.waitForFunction(() => !document.getElementById('rename-dialog').open);
++  await page.fill('#session-search', 'second-thread');
++  assert.equal(await page.locator('details.session').count(), 1);
++  await page.fill('#session-search', '');
++  if (out)
++    await page.screenshot({ path: path.join(out, 'dashboard-sessions-dark.png'), fullPage: true });
+   await page.selectOption('#account', 'demo');
+   await page.waitForTimeout(100);
+   assert.equal(await page.inputValue('#account'), 'demo');
+@@ -151,6 +217,75 @@ async function main() {
+   if (out) await page.screenshot({ path: path.join(out, 'dashboard-limits.png'), fullPage: true });
+   await page.click('button[data-view="health"]');
+   assert.ok((await page.textContent('#content')).includes('Source status'));
++  await page.click('button[data-view="settings"]');
++  await page.waitForSelector('#settings-form');
++  await page.selectOption('#settings-theme', 'light');
++  await page.selectOption('#settings-view', 'sessions');
++  await page.selectOption('#settings-period', '5h');
++  await page.fill('#settings-timezone', 'Asia/Kolkata');
++  await page.fill('#billing-account', 'demo');
++  await page.locator('#billing-account').press('Tab');
++  await page.fill('#billing-day', '31');
++  await page.fill('#billing-time', '09:00');
++  await page.selectOption('#billing-fee-mode', 'usd');
++  await page.fill('#billing-usd', '120');
++  await page.waitForTimeout(2200);
++  await page.click('button[data-view="settings"]');
++  assert.equal(await page.inputValue('#billing-day'), '31', 'live refresh does not erase edits');
++  assert.equal(await page.inputValue('#settings-theme'), 'light');
++  await page.click('#settings-save');
++  await page.waitForFunction(() =>
++    document.getElementById('settings-message').textContent.startsWith('Saved.'),
++  );
++  assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
++  await page.evaluate(() => window.scrollTo(0, 0));
++  if (out)
++    await page.screenshot({ path: path.join(out, 'dashboard-settings-light.png'), fullPage: true });
++  await page.selectOption('#settings-theme', 'system');
++  await page.click('#settings-save');
++  await page.waitForFunction(() => document.documentElement.dataset.theme === 'system');
++  await page.emulateMedia({ colorScheme: 'light' });
++  assert.equal(
++    await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
++    'light',
++  );
++  await page.emulateMedia({ colorScheme: 'dark' });
++  assert.equal(
++    await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
++    'dark',
++  );
++  await page.selectOption('#settings-theme', 'light');
++  await page.click('#settings-save');
++  await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
++  await page.setViewportSize({ width: 390, height: 844 });
++  assert.equal(
++    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
++    true,
++    'settings mobile fit',
++  );
++  if (out)
++    await page.screenshot({
++      path: path.join(out, 'dashboard-settings-mobile.png'),
++      fullPage: true,
++    });
++  await page.click('button[data-view="sessions"]');
++  await page.evaluate(() => window.scrollTo(0, 0));
++  assert.ok(
++    await page
++      .locator('button[data-view="settings"]')
++      .evaluate((n) => n.getBoundingClientRect().right <= window.innerWidth),
++    'Settings navigation visible on mobile',
++  );
++  if (out)
++    await page.screenshot({
++      path: path.join(out, 'dashboard-sessions-mobile.png'),
++      fullPage: true,
++    });
++  assert.equal(
++    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
++    true,
++    'sessions mobile fit',
++  );
+   await page.click('button[data-view="overview"]');
+   await page.setViewportSize({ width: 390, height: 844 });
+   if (out) await page.screenshot({ path: path.join(out, 'dashboard-mobile.png'), fullPage: true });
+@@ -176,7 +311,13 @@ async function main() {
+         checks: [
+           'real collector snapshot',
+           'dashboard boot',
+-          'twelve visible synthetic turns',
++          'two grouped sessions / thirteen turns',
++          'usage-exceeded display status',
++          'local session nickname with HTML treated as text',
++          'session search',
++          'settings save and dirty-form preservation',
++          'dark, light, and system theme behavior',
++          'mobile sessions and settings',
+           'expanded state retained',
+           'account filter',
+           'provider quota view',

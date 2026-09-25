@@ -47,6 +47,7 @@
     "runtime",
     "docs/TEST-REPORT.md",
     "docs/ARCHITECTURE.md",
+    "docs/SESSION-SETTINGS-PATCH.md",
     "docs/SOURCES.md"
   ],
   "scripts": {

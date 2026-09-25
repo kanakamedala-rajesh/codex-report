@@ -82,6 +82,18 @@ content += line(
   new Date().toISOString(),
 );
 fs.writeFileSync(file, content);
+// A second root session deliberately has its own Turn 1.
+const secondAt = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(
+  path.join(source, 'second.jsonl'),
+  line(
+    'session_meta',
+    { id: 'second-thread', session_id: 'second-thread', source: 'cli' },
+    secondAt,
+  ) +
+    line('event_msg', { type: 'task_started', turn_id: 'another-turn' }, secondAt) +
+    line('event_msg', { type: 'turn_aborted', turn_id: 'another-turn' }, secondAt),
+);
 const store = new Store(temp);
 store.close();
 let browser, service;
@@ -102,7 +114,7 @@ async function main() {
     let snapshot;
     for (let n = 0; n < 30; n++) {
       snapshot = await rpc(temp, '/api/report?scope=lifetime');
-      if (snapshot.tasks.length === 12) break;
+      if (snapshot.tasks.length === 13) break;
       await new Promise((r) => setTimeout(r, 100));
     }
     await page.setContent(
@@ -114,17 +126,44 @@ async function main() {
     await page.addStyleTag({
       content: fs.readFileSync(path.join(__dirname, '../public/style.css'), 'utf8'),
     });
-    await page.evaluate((snapshot) => {
-      window.fetch = async (url) =>
-        new Response(
-          JSON.stringify(
-            String(url).includes('/api/status')
-              ? { revision: snapshot.revision, accounts: ['all', 'demo'] }
-              : snapshot,
-          ),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        );
-    }, snapshot);
+    const settings = await rpc(temp, '/api/settings');
+    await page.evaluate(
+      ({ snapshot, settings }) => {
+        let revision = 0;
+        const data = structuredClone(snapshot);
+        const prefs = structuredClone(settings);
+        // This branch only exercises DOM behavior with synthetic responses.
+        // Real auth, validation, persistence and conflicts have HTTP integration tests.
+        window.fetch = async (url, options) => {
+          let result;
+          if (String(url).includes('/api/settings')) {
+            if (options?.method === 'POST') {
+              const changes = JSON.parse(options.body).changes;
+              if (changes.dashboard) Object.assign(prefs.values.dashboard, changes.dashboard);
+              for (const key of ['timezone', 'display', 'reportAccount'])
+                if (key in changes) prefs.values[key] = changes[key];
+              if (changes.accounts) Object.assign(prefs.values.accounts, changes.accounts);
+              if (changes.sessionNames)
+                for (const [id, name] of Object.entries(changes.sessionNames))
+                  data.sessions.find((s) => s.id === id).name = name;
+              prefs.revision = 'fixture-' + ++revision;
+            }
+            result = prefs;
+          } else if (String(url).includes('/api/status'))
+            result = {
+              revision: data.revision + revision,
+              settingsRevision: prefs.revision,
+              accounts: ['all', 'demo'],
+            };
+          else result = data;
+          return new Response(JSON.stringify(result), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        };
+      },
+      { snapshot, settings },
+    );
     await page.addScriptTag({
       content: fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8'),
     });
@@ -137,11 +176,38 @@ async function main() {
   const out = process.env.CODEX_REPORT_SCREENSHOTS;
   if (out) fs.mkdirSync(out, { recursive: true });
   if (out) await page.screenshot({ path: path.join(out, 'dashboard-desktop.png'), fullPage: true });
-  await page.click('button[data-view="turns"]');
-  assert.equal(await page.locator('details.task').count(), 12);
-  await page.locator('details.task summary').first().click();
+  await page.click('button[data-view="sessions"]');
+  assert.equal(await page.locator('details.session').count(), 2);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  if (out)
+    await page.screenshot({ path: path.join(out, 'dashboard-sessions.png'), fullPage: true });
+  const mainSession = page.locator('details.session[data-session="demo-thread"]');
+  await mainSession.locator(':scope > summary').click();
+  assert.equal(await mainSession.locator('details.task').count(), 12);
+  assert.ok((await mainSession.textContent()).includes('Usage exceeded'));
+  await mainSession.locator('details.task summary').first().click();
   await page.waitForTimeout(2200);
-  assert.equal(await page.locator('details.task').first().getAttribute('open'), '');
+  assert.equal(await mainSession.getAttribute('open'), '');
+  assert.equal(await mainSession.locator('details.task').first().getAttribute('open'), '');
+  await mainSession.getByRole('button', { name: 'Name session' }).click();
+  await page.fill('#session-name', '<img src=x onerror=alert(1)>');
+  await page.click('#rename-save');
+  await page.waitForFunction(() => !document.getElementById('rename-dialog').open);
+  await page.waitForFunction(() =>
+    document
+      .querySelector('.session[data-session="demo-thread"] .session-title')
+      .textContent.includes('<img'),
+  );
+  assert.equal(await mainSession.locator('img').count(), 0, 'name rendered as text, never markup');
+  await mainSession.getByRole('button', { name: 'Name session' }).click();
+  await page.fill('#session-name', 'Usage collector refinements');
+  await page.click('#rename-save');
+  await page.waitForFunction(() => !document.getElementById('rename-dialog').open);
+  await page.fill('#session-search', 'second-thread');
+  assert.equal(await page.locator('details.session').count(), 1);
+  await page.fill('#session-search', '');
+  if (out)
+    await page.screenshot({ path: path.join(out, 'dashboard-sessions-dark.png'), fullPage: true });
   await page.selectOption('#account', 'demo');
   await page.waitForTimeout(100);
   assert.equal(await page.inputValue('#account'), 'demo');
@@ -151,6 +217,75 @@ async function main() {
   if (out) await page.screenshot({ path: path.join(out, 'dashboard-limits.png'), fullPage: true });
   await page.click('button[data-view="health"]');
   assert.ok((await page.textContent('#content')).includes('Source status'));
+  await page.click('button[data-view="settings"]');
+  await page.waitForSelector('#settings-form');
+  await page.selectOption('#settings-theme', 'light');
+  await page.selectOption('#settings-view', 'sessions');
+  await page.selectOption('#settings-period', '5h');
+  await page.fill('#settings-timezone', 'Asia/Kolkata');
+  await page.fill('#billing-account', 'demo');
+  await page.locator('#billing-account').press('Tab');
+  await page.fill('#billing-day', '31');
+  await page.fill('#billing-time', '09:00');
+  await page.selectOption('#billing-fee-mode', 'usd');
+  await page.fill('#billing-usd', '120');
+  await page.waitForTimeout(2200);
+  await page.click('button[data-view="settings"]');
+  assert.equal(await page.inputValue('#billing-day'), '31', 'live refresh does not erase edits');
+  assert.equal(await page.inputValue('#settings-theme'), 'light');
+  await page.click('#settings-save');
+  await page.waitForFunction(() =>
+    document.getElementById('settings-message').textContent.startsWith('Saved.'),
+  );
+  assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  if (out)
+    await page.screenshot({ path: path.join(out, 'dashboard-settings-light.png'), fullPage: true });
+  await page.selectOption('#settings-theme', 'system');
+  await page.click('#settings-save');
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'system');
+  await page.emulateMedia({ colorScheme: 'light' });
+  assert.equal(
+    await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
+    'light',
+  );
+  await page.emulateMedia({ colorScheme: 'dark' });
+  assert.equal(
+    await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
+    'dark',
+  );
+  await page.selectOption('#settings-theme', 'light');
+  await page.click('#settings-save');
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    true,
+    'settings mobile fit',
+  );
+  if (out)
+    await page.screenshot({
+      path: path.join(out, 'dashboard-settings-mobile.png'),
+      fullPage: true,
+    });
+  await page.click('button[data-view="sessions"]');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  assert.ok(
+    await page
+      .locator('button[data-view="settings"]')
+      .evaluate((n) => n.getBoundingClientRect().right <= window.innerWidth),
+    'Settings navigation visible on mobile',
+  );
+  if (out)
+    await page.screenshot({
+      path: path.join(out, 'dashboard-sessions-mobile.png'),
+      fullPage: true,
+    });
+  assert.equal(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    true,
+    'sessions mobile fit',
+  );
   await page.click('button[data-view="overview"]');
   await page.setViewportSize({ width: 390, height: 844 });
   if (out) await page.screenshot({ path: path.join(out, 'dashboard-mobile.png'), fullPage: true });
@@ -176,7 +311,13 @@ async function main() {
         checks: [
           'real collector snapshot',
           'dashboard boot',
-          'twelve visible synthetic turns',
+          'two grouped sessions / thirteen turns',
+          'usage-exceeded display status',
+          'local session nickname with HTML treated as text',
+          'session search',
+          'settings save and dirty-form preservation',
+          'dark, light, and system theme behavior',
+          'mobile sessions and settings',
           'expanded state retained',
           'account filter',
           'provider quota view',

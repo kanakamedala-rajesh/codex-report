@@ -4,6 +4,7 @@ import { Sample, Tokens, Turn, Thread } from './types';
 import { period, Period } from './periods';
 import { dollars } from './pricing';
 import { object, clean } from './util';
+import { displayOutcome, DisplayOutcome } from './outcomes';
 export interface Filter {
   scope?: string;
   account?: string;
@@ -63,6 +64,7 @@ export interface TaskRow {
   ended: string | null;
   durationMs: number | null;
   status: string;
+  displayOutcome: DisplayOutcome;
   error: string | null;
   totals: Totals;
   direct: Totals;
@@ -75,6 +77,21 @@ export interface TaskRow {
   collectionPending: boolean;
   recordedTools: number;
 }
+export interface SessionRow {
+  id: string;
+  name: string | null;
+  started: string;
+  lastActivity: string;
+  turnIds: string[];
+  totals: Totals;
+  outcomes: {
+    completed: number;
+    interrupted: number;
+    usageExceeded: number;
+    failed: number;
+    other: number;
+  };
+}
 export interface Report {
   schema: 1;
   revision: number;
@@ -83,6 +100,7 @@ export interface Report {
   period: Period;
   totals: Totals;
   tasks: TaskRow[];
+  sessions: SessionRow[];
   models: { name: string; totals: Totals }[];
   days: { day: string; totals: Totals }[];
   quotas: Record<string, unknown>[];
@@ -93,6 +111,8 @@ export interface Report {
     completed: number;
     interrupted: number;
     failed: number;
+    usageExceeded: number;
+    otherFailed: number;
     p50Ms: number | null;
     p95Ms: number | null;
     averagePrice: string;
@@ -239,6 +259,7 @@ export function report(store: Store, config: Config, f: Filter = {}): Report {
       ended: t?.ended ?? null,
       durationMs: t?.durationMs ?? (t?.ended ? Date.parse(t.ended) - Date.parse(t.started) : null),
       status: t?.status ?? 'unknown',
+      displayOutcome: displayOutcome(t?.status ?? 'unknown', t?.error ?? null),
       error: t?.error ?? null,
       totals: totals(ss),
       direct: totals(ss.filter((s) => s.thread === thread)),
@@ -252,7 +273,50 @@ export function report(store: Store, config: Config, f: Filter = {}): Report {
       recordedTools: toolCounts.get(key) ?? 0,
     });
   }
-  tasks.sort((a, b) => b.started.localeCompare(a.started));
+  tasks.sort((a, b) => b.started.localeCompare(a.started) || a.turn.localeCompare(b.turn));
+  const sessionTasks = new Map<string, TaskRow[]>();
+  const sessionSamples = new Map<string, Sample[]>();
+  for (const task of tasks) {
+    const rows = sessionTasks.get(task.thread) ?? [];
+    rows.push(task);
+    sessionTasks.set(task.thread, rows);
+  }
+  for (const sample of filtered) {
+    const rows = sessionSamples.get(sample.rootThread) ?? [];
+    rows.push(sample);
+    sessionSamples.set(sample.rootThread, rows);
+  }
+  const sessions: SessionRow[] = [...sessionTasks]
+    .map(([id, rows]) => {
+      const ordered = [...rows].sort(
+        (a, b) => a.started.localeCompare(b.started) || a.turn.localeCompare(b.turn),
+      );
+      const sessionRows = sessionSamples.get(id) ?? [];
+      const started = tm.get(id)?.started || ordered[0]?.started || '';
+      const lastActivity = [
+        ...rows.map((t) => t.ended ?? t.started),
+        ...sessionRows.map((r) => r.at),
+      ].reduce((last, at) => (at > last ? at : last), started);
+      return {
+        id,
+        name: config.sessionNames?.[id] ?? null,
+        started,
+        lastActivity,
+        turnIds: ordered.map((t) => t.turn),
+        totals: totals(sessionRows),
+        outcomes: {
+          completed: rows.filter((t) => t.status === 'completed').length,
+          interrupted: rows.filter((t) => t.status === 'interrupted').length,
+          usageExceeded: rows.filter((t) => t.displayOutcome.code === 'usage-exceeded').length,
+          failed: rows.filter(
+            (t) => t.status === 'failed' && t.displayOutcome.code !== 'usage-exceeded',
+          ).length,
+          other: rows.filter((t) => !['completed', 'failed', 'interrupted'].includes(t.status))
+            .length,
+        },
+      };
+    })
+    .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity) || a.id.localeCompare(b.id));
   const models = [...new Set(filtered.map((s) => s.model || 'unknown'))].map((name) => ({
     name,
     totals: totals(filtered.filter((s) => (s.model || 'unknown') === name)),
@@ -325,6 +389,7 @@ export function report(store: Store, config: Config, f: Filter = {}): Report {
     period: p,
     totals: t,
     tasks,
+    sessions,
     models,
     days: [...dg.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -349,6 +414,10 @@ export function report(store: Store, config: Config, f: Filter = {}): Report {
       completed: tasks.filter((t) => t.status === 'completed').length,
       interrupted: tasks.filter((t) => t.status === 'interrupted').length,
       failed: tasks.filter((t) => t.status === 'failed').length,
+      usageExceeded: tasks.filter((t) => t.displayOutcome.code === 'usage-exceeded').length,
+      otherFailed: tasks.filter(
+        (t) => t.status === 'failed' && t.displayOutcome.code !== 'usage-exceeded',
+      ).length,
       p50Ms: percentile(0.5),
       p95Ms: percentile(0.95),
       averagePrice: dollars(mean),
@@ -375,7 +444,7 @@ export function receipt(task: TaskRow, context?: Report, override?: string): str
       ? 'interrupted by you'
       : status === 'stopping'
         ? 'stopping point'
-        : status;
+        : displayOutcome(status, task.error).label.toLowerCase();
   const rows = [
     `Turn ${task.number ?? task.turn.slice(0, 8)} - ${title}`,
     `Elapsed        ${duration(task.durationMs)}`,
@@ -387,7 +456,7 @@ export function receipt(task: TaskRow, context?: Report, override?: string): str
   ];
   for (const [model, count] of Object.entries(task.unpriced))
     rows.push(`Not priced     ${count} ${clean(model)} request(s)`);
-  if (task.error) rows.push(`Failure        ${clean(task.error)}`);
+  if (task.error) rows.push(`Reason         ${clean(task.error)}`);
   if (task.workers + task.reviewers + task.unlinked)
     rows.push(
       `Child work     ${task.workers} workers; ${task.reviewers} approval reviews${task.unlinked ? `; ${task.unlinked} unlinked` : ''}`,
@@ -407,12 +476,12 @@ export function reportText(r: Report): string {
     `Codex Report | ${r.period.label} | ${r.account}`,
     `Input: ${r.totals.input.toLocaleString('en-US')} | Output: ${r.totals.output.toLocaleString('en-US')}`,
     `API-equivalent: ${r.totals.apiEquivalent} | Unpriced requests: ${r.totals.unpricedRequests}`,
-    `Tasks: ${r.statistics.tasks} | completed ${r.statistics.completed} | interrupted ${r.statistics.interrupted} | failed ${r.statistics.failed}`,
+    `Tasks: ${r.statistics.tasks} | completed ${r.statistics.completed} | interrupted ${r.statistics.interrupted} | usage exceeded ${r.statistics.usageExceeded} | other failures ${r.statistics.otherFailed}`,
     ...r.tasks
       .slice(0, 20)
       .map(
         (t) =>
-          `  ${t.started} | ${t.number ?? '?'} ${t.status} | ${t.totals.apiEquivalent} | ${t.totals.processed.toLocaleString('en-US')} tokens`,
+          `  ${t.started} | ${t.number ?? '?'} ${t.displayOutcome.label} | ${t.totals.apiEquivalent} | ${t.totals.processed.toLocaleString('en-US')} tokens`,
       ),
   ].join('\n');
 }
@@ -445,6 +514,8 @@ export function exportReport(r: Report, format: string): string {
           'reasoning',
           'api_equivalent',
           'unpriced_requests',
+          'display_status',
+          'error',
         ],
         ...r.tasks.map((t) => [
           t.turn,
@@ -457,6 +528,8 @@ export function exportReport(r: Report, format: string): string {
           t.totals.reasoning,
           t.totals.apiEquivalent,
           t.totals.unpricedRequests,
+          t.displayOutcome.label,
+          t.error,
         ]),
       ]
         .map((row) => row.map(cell).join(','))

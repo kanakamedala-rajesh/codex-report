@@ -10,8 +10,17 @@ prompts and tool contents; only the allowlisted metadata projection is retained.
 - Binds to 127.0.0.1, not the LAN. The browser needs the installation's private token.
 - A fragment-based token exchange produces an HttpOnly SameSite=Strict cookie.
 - Host and Origin checks, CSP, fixed asset routes and size/time bounds are enforced.
-- Browser routes are read-only. Internal hook/sync/stop operations require bearer
-  authentication and do not accept filesystem paths from browser cookies alone.
+- Analytics routes are read-only. `GET /api/settings` returns an explicit public
+  projection, never tokens, device IDs or source paths. `POST /api/settings` can
+  change only allowlisted presentation/reporting/billing fields and local session
+  nicknames. Cookie-authenticated writes require an exact same-Origin header and
+  JSON content type; body size is capped at 64 KiB. Duplicate/unknown fields and
+  stale config revisions are rejected. The worker serializes writes, backs up the
+  private config, atomically replaces it, reloads settings, and records an audit.
+  Config and audit are separate stores: an audit failure is reported as a warning
+  after a successful config save, not misrepresented as a failed save.
+- Internal hook/sync/stop operations still require bearer authentication and do
+  not accept filesystem paths from browser cookies alone.
 - The server does not expose the ledger, backups, configuration or raw rollouts.
 - A malicious process already running as the same OS user can read that user's
   private files; localhost authentication does not replace the OS trust boundary.
