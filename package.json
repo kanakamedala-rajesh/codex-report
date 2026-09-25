@@ -64,7 +64,8 @@
     "check": "pnpm run format:check && pnpm run lint && pnpm run type-check && pnpm test && pnpm run check:package",
     "verify": "pnpm run check && pnpm run test:package",
     "audit:dependencies": "pnpm audit --prod --audit-level=high",
-    "test:browser": "pnpm run build && node tools/browser-smoke.cjs",
+    "test:browser": "pnpm run build && node tools/browser-smoke.cjs && node tools/appearance-browser.cjs",
+    "test:appearance": "pnpm run build && node tools/appearance-browser.cjs",
     "pack:local": "pnpm run build && pnpm run check:package && node tools/pack.cjs",
     "browser:install": "playwright-core install chromium"
   },

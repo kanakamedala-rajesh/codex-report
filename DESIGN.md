@@ -1,43 +1,63 @@
 # Desktop workspace design
 
-Surface mode: Operate. The user explicitly prioritizes readable computer layouts
-and rejects small type, crowded panels, and phone-specific navigation.
+Surface mode: Operate. Prioritize comfortable reading on computers, predictable
+controls, and progressive detail. Phone layouts are not a product target; smaller
+computer windows and browser zoom must still work.
 
-## Typography and layout
+## Color system
 
-Use one locally available sans family. Geist is the first preference, followed by
-Segoe UI and platform sans; there is no font download or bundled font file.
-The root is 16px, body and control text 17px, labels/notes/data metadata 16px,
-section headings 24px, and page headings 36px. Do not scale graph text with SVG:
-its labels and values are normal HTML text. Token values use tabular numerals.
+Use a cool near-black / crisp-white pair, with electric indigo for primary
+controls and selection, violet for secondary emphasis, and cyan as a third data
+category. Do not reuse action colors as implied usage outcomes. Successful work
+is emerald, interruptions violet, exceeded usage amber, and other failures rose.
+Each outcome also has a text label.
 
-Controls are at least 48px high, fields 50px, navigation 54px. A 260px desktop
-sidebar and a bounded content column provide stable alignment. Laptop widths use
-238px navigation without shrinking typography. Narrow computer windows reflow to
-an ordinary wrapping navigation strip, not a phone drawer. Browser zoom must not
-be disabled. No hard minimum page width or hidden horizontal overflow fix.
+All values are CSS semantic tokens: canvas, sidebar, surface, raised, field, ink,
+muted, subtle, line, line-strong, primary/fill/hover/ink/wash, secondary/wash,
+status pairs, and chart categories. Dark and light ramps are composed separately.
+System-light maps to exactly the explicit light tokens. Primary filled buttons
+retain white labels on hover; ordinary secondary actions remain neutral. Theme
+foreground and background switch together, not through an unreadable crossfade.
 
-Overview presents summaries, then one wide day/model breakdown, then recent
-sessions. Sessions progressively expose turns and technical identifiers. Settings
-has Appearance, Reporting, and Billing tabs with one persistent form and save bar;
-changing a tab must not rebuild fields or discard edits. Native field constraints
-must reveal and focus the first invalid field even when its panel is hidden.
+## Typography and global sizing
 
-## Color and interaction
+Use the native modern system sans stack, consistent weights, comfortable leading,
+and tabular measurement figures. Do not promise an uninstalled face, bundle font
+files, or load remote fonts. Code identifiers retain an appropriate monospace role.
 
-Slate and white theme surfaces with restrained teal emphasis; semantic status
-colors remain distinct from chart categories. Dark, light, and system settings
-retain their existing meaning. All colors belong to the CSS token system.
+The stored `dashboard.fontSize` is an optional whole number from 14 through 24,
+with a nominal 17 default. Old configurations without it keep working and are not
+rewritten merely by reading them. A browser's ordinary 16px initial size maps to
+17px body text at the default; percentages preserve browser text preferences.
 
-Use standard controls, visible keyboard focus, click-operated disclosures, and
-short state transitions. No marketing hero, scroll hijacking, decorative imagery,
-external resources, phone navigation, or animation framework. Reduced motion
-removes transitions while retaining state changes and visible information.
+A validated `data-font-size` attribute selects the root percentage. Every text
+role uses `rem` or inherits it: body, headings, metadata, navigation, buttons,
+inputs, options, table cells, HTML chart labels, badges, notices, code/pre,
+placeholders, footers, and dialogs. Numeric headings remain larger than labels;
+scaling never makes every role the same size. No fixed-pixel descendant fonts,
+CSS zoom, page transforms, or disabled browser zoom. Browser-owned menus/chrome
+and terminal text are outside document styling.
 
-## Truth and stability
+Core spacing, icons and controls grow with the root, with a 44px minimum control
+height at the smallest user setting. Container queries reflow crowded data and
+forms instead of shrinking type. Tables may scroll inside their own labelled
+region. Save controls remain in normal flow so enlarged forms are not obscured.
 
-No usage is not a zero-dollar claim. Unpriced work remains identified. Account,
-model, and period filters keep the same API semantics. Expanded sessions, turns,
-and meaningful focus survive refresh. Background updates pause while text is
-being selected or a session name is being edited. Settings conflicts and failed
-requests must retain input and show an actionable message, not silently reset it.
+## Settings behavior
+
+Appearance has a numeric size input, keyboard-operable slider, and Reset to 17.
+Both theme and size preview across the document immediately. Save uses the existing
+revision-checked settings endpoint. A rejected save retains the draft and preview;
+discard/reload restores saved appearance. Switching settings tabs never loses
+edits. Reset and all inputs are disabled during an in-flight save. Newly opened
+pages and dialogs inherit the saved size without individual component overrides.
+
+Appearance, Reporting, and Billing remain one mounted form. Native constraints
+reveal and focus the first invalid field even when its panel is hidden.
+
+## Preserved product contracts
+
+Usage data, pricing, account attribution, quotas, hooks and ledger schemas remain
+unchanged. Authentication, same-origin write requirements, backups and audit entries
+stay in force. No external resources, analytics, provider requests or dependencies
+are introduced. Empty and unpriced usage remain distinct from zero-dollar usage.

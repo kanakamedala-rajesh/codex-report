@@ -91,6 +91,19 @@ const renameDialog = /** @type {HTMLDialogElement} */ (byId('rename-dialog'));
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
 }
+/** @param {number|undefined} size */
+function applyFontSize(size) {
+  // An allowlisted attribute selects the root percentage in CSS: no inline style,
+  // page transform or browser-zoom override. Every text role is rooted in rem.
+  const value =
+    size !== undefined && Number.isInteger(size) && size >= 14 && size <= 24 ? size : 17;
+  document.documentElement.dataset.fontSize = String(value);
+}
+/** @param {DashboardPreferences} preferences */
+function applyAppearance(preferences) {
+  applyTheme(preferences.theme);
+  applyFontSize(preferences.fontSize);
+}
 /** @param {string} text */
 function showError(text) {
   byId('error').textContent = text;
@@ -117,7 +130,7 @@ async function saveSettings(changes, expectedRevision) {
     })
   );
   settingsState = saved;
-  applyTheme(saved.values.dashboard.theme);
+  applyAppearance(saved.values.dashboard);
   revision = -1;
   return saved;
 }
@@ -752,7 +765,7 @@ function comparisonView(report) {
     el(
       'p',
       'Last five hours is a local lookback. A quota snapshot has its own window and reset time. API estimates are not subscription charges.',
-      'note comparison-note',
+      'note',
     ),
   );
   grid.append(snapshots, workload);
@@ -907,7 +920,7 @@ async function refresh(force = false) {
       !renameDialog.open
     ) {
       settingsState = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
-      applyTheme(settingsState.values.dashboard.theme);
+      applyAppearance(settingsState.values.dashboard);
     }
     const account = select('account');
     for (const name of status.accounts) {
@@ -967,6 +980,14 @@ async function refresh(force = false) {
       });
     }
   }
+}
+/** @param {string} label @param {string} className */
+function buttonElement(label, className) {
+  const node = document.createElement('button');
+  node.type = 'button';
+  node.textContent = label;
+  node.className = className;
+  return node;
 }
 /** @param {HTMLElement} parent @param {string} id @param {string} label @param {string} [value] @param {string} [type] */
 function inputField(parent, id, label, value = '', type = 'text') {
@@ -1044,7 +1065,7 @@ function settingsView() {
   form.noValidate = true;
   const appearance = panel(
     'Appearance',
-    'Choose a theme and the page you start on. Preferences are saved on this computer.',
+    'Personalize the entire workspace. Preview changes here, then save them for this computer.',
   );
   const fields = el('div', '', 'form-grid');
   selectField(
@@ -1123,7 +1144,76 @@ function settingsView() {
     ],
     String(state.dashboard.sessionsPerPage),
   );
-  appearance.append(fields);
+  const typography = el('section', '', 'typography-settings');
+  typography.setAttribute('aria-labelledby', 'typography-heading');
+  const typographyHeading = el('h3', 'Text size');
+  typographyHeading.id = 'typography-heading';
+  const help = el(
+    'p',
+    'Scales every page, including navigation, charts, tables, settings, and dialogs. Preview is instant; Save settings makes it permanent.',
+    'note',
+  );
+  help.id = 'font-size-help';
+  const sizeControls = el('div', '', 'font-size-controls');
+  const size = inputField(
+    sizeControls,
+    'settings-font-size',
+    'Base size',
+    String(state.dashboard.fontSize ?? 17),
+    'number',
+  );
+  size.min = '14';
+  size.max = '24';
+  size.step = '1';
+  size.required = true;
+  size.setAttribute('aria-describedby', 'font-size-help font-size-units');
+  const slider = inputField(
+    sizeControls,
+    'settings-font-slider',
+    'Adjust text size',
+    String(state.dashboard.fontSize ?? 17),
+    'range',
+  );
+  slider.min = '14';
+  slider.max = '24';
+  slider.step = '1';
+  slider.setAttribute('aria-describedby', 'font-size-help font-size-units');
+  const reset = buttonElement('Reset to 17', 'secondary');
+  reset.id = 'font-size-reset';
+  reset.dataset.preferenceAction = 'reset-size';
+  sizeControls.append(reset);
+  const units = el(
+    'p',
+    '14-24 px reference size. Default: 17. Browser text preferences and zoom still apply.',
+    'note',
+  );
+  units.id = 'font-size-units';
+  const preview = el('div', '', 'type-preview');
+  preview.setAttribute('aria-label', 'Typography preview');
+  preview.append(
+    el('span', 'Aa', 'type-specimen'),
+    el('p', 'Your workspace, at your reading size.'),
+    el('span', '0123456789', 'type-numerals'),
+  );
+  typography.append(typographyHeading, help, sizeControls, units, preview);
+  appearance.append(fields, typography);
+  const previewSize = () => {
+    if (settingsSaving || !size.validity.valid || !size.value) return;
+    slider.value = size.value;
+    slider.setAttribute('aria-valuetext', `${size.value} pixels reference size`);
+    applyFontSize(Number(size.value));
+  };
+  size.addEventListener('input', previewSize);
+  slider.addEventListener('input', () => {
+    if (settingsSaving) return;
+    size.value = slider.value;
+    previewSize();
+  });
+  reset.addEventListener('click', () => {
+    if (settingsSaving) return;
+    size.value = '17';
+    size.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   const reporting = panel(
     'Reporting defaults',
     'Set your initial filters, timezone, and terminal detail. Recorded usage and prices stay unchanged.',
@@ -1235,6 +1325,10 @@ function settingsView() {
     ['reporting', 'Reporting', reporting],
     ['billing', 'Billing', billing],
   ]);
+  select('settings-theme').addEventListener('change', () => {
+    if (!settingsSaving) applyTheme(select('settings-theme').value);
+  });
+  previewSize();
   fillBilling(billAccount.value);
   /** @param {Event} event */
   const mark = (event) => {
@@ -1271,6 +1365,7 @@ function settingsView() {
     void get('/api/settings')
       .then((value) => {
         settingsState = /** @type {SettingsSnapshot} */ (value);
+        applyAppearance(settingsState.values.dashboard);
         settingsView();
       })
       .catch((e) => {
@@ -1300,6 +1395,7 @@ function settingsView() {
     const changes = {
       dashboard: {
         theme: select('settings-theme').value,
+        fontSize: Number(input('settings-font-size').value),
         defaultView: select('settings-view').value,
         defaultPeriod: select('settings-period').value,
         defaultModel: input('settings-model').value.trim(),
@@ -1336,7 +1432,7 @@ function settingsView() {
     save.disabled = true;
     reload.disabled = true;
     // Freeze controls so edits made while the request is in flight cannot be silently lost.
-    const controls = [...form.querySelectorAll('input,select')];
+    const controls = [...form.querySelectorAll('input,select,button[data-preference-action]')];
     const disabledBefore = controls.map((n) => n.hasAttribute('disabled'));
     controls.forEach((n) => n.setAttribute('disabled', ''));
     void saveSettings(changes, settingsDraftRevision)
@@ -1347,7 +1443,7 @@ function settingsView() {
         status.dataset.state = saved.auditWarning ? 'error' : 'saved';
         status.textContent =
           saved.auditWarning ||
-          'Saved. Theme and reporting settings apply now. Default page and filters apply when you reopen the dashboard.';
+          'Saved. Appearance, text size, and reporting settings apply now. Default page and filters apply when you reopen the dashboard.';
       })
       .catch((e) => {
         status.dataset.state = 'error';
@@ -1429,6 +1525,8 @@ async function navigate(next) {
     !window.confirm('Discard unsaved settings?')
   )
     return;
+  if (view === 'settings' && next !== view && settingsState)
+    applyAppearance(settingsState.values.dashboard);
   settingsDirty = false;
   const sequence = ++navigationSequence;
   view = next;
@@ -1468,6 +1566,7 @@ async function navigate(next) {
       const snapshot = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
       if (sequence === navigationSequence && view === 'settings') {
         settingsState = snapshot;
+        applyAppearance(snapshot.values.dashboard);
         settingsView();
       }
     } catch (error) {
@@ -1488,7 +1587,7 @@ async function boot() {
     });
   }
   settingsState = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
-  applyTheme(settingsState.values.dashboard.theme);
+  applyAppearance(settingsState.values.dashboard);
   setOption('period', settingsState.values.dashboard.defaultPeriod);
   setOption(
     'account',
