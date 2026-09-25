@@ -23,18 +23,21 @@ export function openDatabase(file: string, readonly = false): { db: Database; ba
     throw new Error('Expected an existing database file.');
   const req = createRequire(__filename);
   let Constructor: (new (p: string, o: object) => Database) | undefined;
+  let nativeModule: string | undefined;
   if (process.env.CODEX_REPORT_SQLITE_BACKEND !== 'builtin') {
     try {
-      Constructor = req('libsql') as typeof Constructor;
+      // The collector itself runs in a worker. Resolve only on Windows so the
+      // native addon is loaded exclusively inside its dedicated process.
+      if (process.platform === 'win32') nativeModule = req.resolve('libsql');
+      else Constructor = req('libsql') as typeof Constructor;
     } catch (error) {
       if (process.env.CODEX_REPORT_SQLITE_BACKEND === 'libsql') throw error;
     }
     // Opening an existing database must not silently fall back after a real database error.
-    if (Constructor) {
-      const db =
-        process.platform === 'win32'
-          ? isolatedDatabase({ file, module: req.resolve('libsql'), readonly })
-          : new Constructor(file, { timeout: 1500 });
+    if (Constructor || nativeModule) {
+      const db = nativeModule
+        ? isolatedDatabase({ file, module: nativeModule, readonly })
+        : new Constructor!(file, { timeout: 1500 });
       try {
         if (readonly) db.exec('PRAGMA query_only=ON;');
         return { db, backend: 'libsql 0.5.29' };

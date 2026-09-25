@@ -116,3 +116,91 @@ test('a failed database close cannot release the writer lease prematurely', (t) 
   store.close();
   assert.equal(fs.existsSync(path.join(home, 'writer.lock')), false);
 });
+
+test('native connections live in a separate process, not in the application worker heap', (t) => {
+  const { home } = fixture(t);
+  const module = path.join(home, 'process-fixture.cjs');
+  const trace = path.join(home, 'connection-pid.txt');
+  fs.writeFileSync(
+    module,
+    `const fs = require('node:fs');
+module.exports = class {
+  constructor() { fs.writeFileSync(${JSON.stringify(trace)}, String(process.pid)); }
+  close() {}
+};`,
+  );
+  const db = isolatedDatabase({ file: ':memory:', module, readonly: false });
+  try {
+    const pid = Number(fs.readFileSync(trace, 'utf8'));
+    assert.ok(Number.isInteger(pid) && pid > 0);
+    assert.notEqual(pid, process.pid, 'native addons must not share the application process');
+  } finally {
+    db.close();
+  }
+});
+
+test('repeated connection teardown releases native resources without relying on main-thread GC', (t) => {
+  const { home, open } = fixture(t);
+  for (let i = 0; i < 12; i++) {
+    const file = `repeat-${i}.sqlite3`;
+    const db = open(file);
+    db.exec('CREATE TABLE sample (value INTEGER)');
+    const insert = db.prepare('INSERT INTO sample VALUES(?)');
+    insert.run(i);
+    assert.equal(db.prepare('SELECT value FROM sample').get().value, i);
+    db.close();
+    fs.unlinkSync(path.join(home, file));
+    assert.throws(() => insert.run(0), /not open/);
+  }
+});
+
+test('Windows adapter resolves the native entrypoint without loading it into its caller', (t) => {
+  const { home } = fixture(t);
+  const Module = require('node:module');
+  const { openDatabase } = require('../dist/database');
+  const module = path.join(home, 'routing-fixture.cjs');
+  const trace = path.join(home, 'routing-pid.txt');
+  fs.writeFileSync(
+    module,
+    `const fs = require('node:fs');
+module.exports = class {
+  constructor() { fs.writeFileSync(${JSON.stringify(trace)}, String(process.pid)); }
+  close() {}
+};`,
+  );
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const original = Module._load;
+  const resolve = Module._resolveFilename;
+  const prior = process.env.CODEX_REPORT_SQLITE_BACKEND;
+  let loads = 0;
+  // Exercise the Windows selection path on every CI host. Native Windows
+  // behavior is separately exercised by that platform's unmodified tests.
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  process.env.CODEX_REPORT_SQLITE_BACKEND = 'libsql';
+  Module._load = function (request, ...args) {
+    if (request === 'libsql') {
+      loads++;
+      throw new Error('Native addon must not load in the calling worker.');
+    }
+    return original.call(this, request, ...args);
+  };
+  Module._resolveFilename = function (request, ...args) {
+    if (request === 'libsql') return module;
+    return resolve.call(this, request, ...args);
+  };
+  let db;
+  try {
+    const opened = openDatabase(path.join(home, 'routing.sqlite3'));
+    db = opened.db;
+    assert.equal(opened.backend, 'libsql 0.5.29');
+    assert.equal(loads, 0);
+    assert.notEqual(Number(fs.readFileSync(trace, 'utf8')), process.pid);
+  } finally {
+    db?.close();
+    Module._load = original;
+    Module._resolveFilename = resolve;
+    Object.defineProperty(process, 'platform', platform);
+    if (prior === undefined) delete process.env.CODEX_REPORT_SQLITE_BACKEND;
+    else process.env.CODEX_REPORT_SQLITE_BACKEND = prior;
+  }
+});

@@ -2,12 +2,12 @@ import {
   isMainThread,
   MessageChannel,
   MessagePort,
-  parentPort,
   receiveMessageOnPort,
   Worker,
   workerData,
 } from 'node:worker_threads';
 import { createRequire } from 'node:module';
+import { spawn, ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import type { Database, Statement } from './database';
 
@@ -18,6 +18,7 @@ interface Request {
   op: Operation;
   sql?: string;
   params?: Value[];
+  options?: Options;
 }
 interface Reply {
   id: number;
@@ -31,7 +32,7 @@ interface Options {
   readonly: boolean;
 }
 interface Bootstrap {
-  role: 'database-supervisor' | 'database-connection';
+  role: 'database-supervisor';
   options: Options;
   port?: MessagePort;
   signal?: SharedArrayBuffer;
@@ -45,14 +46,14 @@ function failure(error: unknown): NonNullable<Reply['error']> {
 }
 
 /**
- * The pinned libsql binding leaves prepared statements alive until native GC.
- * On Windows those references prevent unlink/replace even after db.close().
- * Own the connection in a worker, and acknowledge close only from a supervisor
- * AFTER that worker exits. The exit event follows native environment teardown.
- * No forced GC, delayed deletion, new binary, or SQL/data conversion is involved.
+ * libsql retains statements after close(), and its native worker teardown can
+ * crash Node 18 on Windows. A dedicated process owns the native connection.
+ * A supervisor acknowledges close only AFTER that process exits, when Windows
+ * has released its handles. A native failure cannot crash the application.
  *
- * The second worker matters: the synchronous caller cannot process its own
- * Worker exit callback while waiting. The supervisor can, then wakes the caller.
+ * The supervisor worker carries messages only; it never loads a native addon.
+ * It bridges asynchronous process events to the existing synchronous API.
+ * No forced GC, delayed file deletion, new binary, or SQL conversion is used.
  */
 export function isolatedDatabase(options: Options): Database {
   const { port1, port2 } = new MessageChannel();
@@ -90,7 +91,7 @@ export function isolatedDatabase(options: Options): Database {
         throw workerError || new Error('The database worker has stopped.');
       }
       const remaining = deadline - Date.now();
-      if (remaining <= 0) throw workerError || new Error('Database worker did not respond.');
+      if (remaining <= 0) throw workerError || new Error('Database process did not respond.');
       const observed = Atomics.load(signal, 0);
       // The port message is queued before its wakeup. A short poll also covers
       // worker-start failures without depending on the blocked caller's events.
@@ -106,7 +107,7 @@ export function isolatedDatabase(options: Options): Database {
       reply = wait(id, Date.now() + 60000);
     } catch (error) {
       // The supervisor stays responsive while native SQL is running. Ask it to
-      // terminate the connection and wait for the actual exit before releasing.
+      // terminate the connection process and wait for its exit before releasing.
       if (closed) throw error;
       const abortId = ++sequence;
       port1.postMessage({ id: abortId, op: 'abort' } satisfies Request);
@@ -116,7 +117,7 @@ export function isolatedDatabase(options: Options): Database {
       } catch {
         throw Object.assign(
           new Error(
-            'Database worker shutdown is unconfirmed; stop this process before maintenance.',
+            'Database process shutdown is unconfirmed; stop this process before maintenance.',
           ),
           { code: 'CODEX_REPORT_DATABASE_SHUTDOWN_UNCONFIRMED' },
         );
@@ -143,7 +144,7 @@ export function isolatedDatabase(options: Options): Database {
         void supervisor.terminate();
         throw Object.assign(
           new Error(
-            'Database worker shutdown is unconfirmed; stop this process before maintenance.',
+            'Database process shutdown is unconfirmed; stop this process before maintenance.',
           ),
           { code: 'CODEX_REPORT_DATABASE_SHUTDOWN_UNCONFIRMED' },
         );
@@ -172,9 +173,10 @@ export function isolatedDatabase(options: Options): Database {
 function supervise(bootstrap: Bootstrap): void {
   const port = bootstrap.port!;
   const signal = new Int32Array(bootstrap.signal!);
-  let connection: Worker | undefined;
+  let connection: ChildProcess | undefined;
   let pending = 0;
   let terminal: Reply | undefined;
+  let aborting = false;
   const send = (reply: Reply, stopped = false) => {
     // Carry terminal state in the reply as well as the wakeup; the receiver
     // may read the port before the following shared-state store is visible.
@@ -186,8 +188,9 @@ function supervise(bootstrap: Bootstrap): void {
   port.on('message', (request: Request) => {
     pending = request.id;
     if (request.op === 'abort') {
+      aborting = true;
       terminal = { id: request.id };
-      if (connection) void connection.terminate();
+      if (connection) connection.kill();
       else {
         send(terminal, true);
         port.close();
@@ -196,11 +199,14 @@ function supervise(bootstrap: Bootstrap): void {
     }
     if (request.op === 'open') {
       try {
-        connection = new Worker(__filename, {
-          workerData: {
-            role: 'database-connection',
-            options: bootstrap.options,
-          } satisfies Bootstrap,
+        connection = spawn(process.execPath, [__filename, '--codex-report-database-child'], {
+          stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+          serialization: 'advanced',
+          windowsHide: true,
+        });
+        let diagnostic = '';
+        connection.stderr?.on('data', (chunk: Buffer) => {
+          diagnostic = (diagnostic + chunk.toString()).slice(-4096);
         });
         connection.on('message', (reply: Reply & { closing?: boolean }) => {
           if (terminal) return;
@@ -210,14 +216,16 @@ function supervise(bootstrap: Bootstrap): void {
         connection.on('error', (error) => {
           terminal = { id: pending, error: failure(error) };
         });
-        connection.on('exit', (code) => {
-          send(
-            terminal || {
-              id: pending,
-              error: { message: `Database worker exited unexpectedly (${code}).` },
+        connection.on('close', (code, signalName) => {
+          const unexpected: Reply = {
+            id: pending,
+            error: terminal?.error || {
+              message: `Database process exited unexpectedly (${code ?? signalName}). ${diagnostic.trim()}`,
             },
-            true,
-          );
+          };
+          // A native crash during close must not become a successful close just
+          // because its reply was queued before teardown failed.
+          send(code !== 0 && !aborting ? unexpected : terminal || unexpected, true);
           connection = undefined;
           port.close();
         });
@@ -229,16 +237,20 @@ function supervise(bootstrap: Bootstrap): void {
       port.close();
       return;
     }
-    connection?.postMessage(request);
+    connection?.send(
+      request.op === 'open' ? { ...request, options: bootstrap.options } : request,
+      (error) => {
+        if (error && !terminal) {
+          terminal = { id: pending, error: failure(error) };
+          connection?.kill();
+        }
+      },
+    );
   });
 }
 
-function connect(options: Options): void {
+function connect(): void {
   const req = createRequire(__filename);
-  const loaded = req(options.module) as
-    | { DatabaseSync?: new (file: string, options: object) => Database }
-    | (new (file: string, options: object) => Database);
-  const Constructor = typeof loaded === 'function' ? loaded : loaded.DatabaseSync!;
   let db: Database | undefined;
   const cache = new Map<string, Statement>();
   const statement = (sql: string): Statement => {
@@ -250,10 +262,16 @@ function connect(options: Options): void {
     }
     return value;
   };
-  parentPort!.on('message', (request: Request) => {
+  process.on('disconnect', () => process.exit(1));
+  process.on('message', (request: Request) => {
     const reply: Reply & { closing?: boolean } = { id: request.id };
     try {
       if (request.op === 'open') {
+        const options = request.options!;
+        const loaded = req(options.module) as
+          | { DatabaseSync?: new (file: string, options: object) => Database }
+          | (new (file: string, options: object) => Database);
+        const Constructor = typeof loaded === 'function' ? loaded : loaded.DatabaseSync!;
         if (options.readonly && !fs.statSync(options.file).isFile())
           throw new Error('Expected an existing database file.');
         db = new Constructor(options.file, { timeout: 1500, readOnly: options.readonly });
@@ -270,11 +288,12 @@ function connect(options: Options): void {
       reply.error = failure(error);
     }
     if (request.op === 'close' || (request.op === 'open' && reply.error)) reply.closing = true;
-    parentPort!.postMessage(reply);
-    if (reply.closing) process.exit(0);
+    process.send!(reply, (error: Error | null) => {
+      if (error || reply.closing) process.exit(error ? 1 : 0);
+    });
   });
 }
 
 if (!isMainThread && workerData?.role === 'database-supervisor') supervise(workerData as Bootstrap);
-else if (!isMainThread && workerData?.role === 'database-connection')
-  connect((workerData as Bootstrap).options);
+else if (isMainThread && process.argv[2] === '--codex-report-database-child' && process.send)
+  connect();
