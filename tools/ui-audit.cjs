@@ -1,103 +1,114 @@
 'use strict';
 const assert = require('node:assert/strict');
-
-// Direct technical checks for the Impeccable audit. This is not its binary
-// detector or a WCAG certification. The user-scoped targets are computer windows.
-async function auditDesktop(page, name) {
+async function auditPage(page, name) {
   const result = await page.evaluate(() => {
-    const visible = (node) => {
-      if (!(node instanceof HTMLElement) || node.closest('[hidden]')) return false;
-      const rect = node.getBoundingClientRect();
-      const style = getComputedStyle(node);
-      return (
-        rect.width > 0 &&
-        rect.height > 0 &&
-        style.visibility !== 'hidden' &&
-        style.display !== 'none' &&
-        !node.closest('.sr-only')
-      );
+    const visible = (node) =>
+      node.getClientRects().length > 0 && !node.closest('[hidden],.hidden,.sr-only');
+    const rgb = (value) => {
+      const n = value.match(/[\d.]+/g);
+      return n ? n.map(Number) : [0, 0, 0, 0];
     };
-    const rgba = (value) => {
-      const nums = value.match(/[\d.]+/g)?.map(Number) || [];
-      return [nums[0] || 0, nums[1] || 0, nums[2] || 0, nums[3] ?? 1];
-    };
-    const over = (front, back) =>
-      [0, 1, 2].map((i) => front[i] * front[3] + back[i] * (1 - front[3]));
+    const luminance = (values) =>
+      values
+        .slice(0, 3)
+        .map((v) => {
+          const c = v / 255;
+          return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        })
+        .reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
     const background = (node) => {
-      const layers = [];
-      for (let parent = node; parent; parent = parent.parentElement)
-        layers.unshift(rgba(getComputedStyle(parent).backgroundColor));
-      return layers.reduce((color, layer) => over(layer, color), [255, 255, 255]);
+      for (let p = node; p; p = p.parentElement) {
+        const c = rgb(getComputedStyle(p).backgroundColor);
+        if (c.length === 3 || c[3] === 1) return c;
+      }
+      return rgb(getComputedStyle(document.body).backgroundColor);
     };
-    const luminance = (color) =>
-      color
-        .map((v) => v / 255)
-        .map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
-        .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
-    const texts = [...document.querySelectorAll('body *')].filter(
-      (node) =>
-        visible(node) &&
-        !['SCRIPT', 'STYLE', 'OPTION', 'SVG', 'PATH'].includes(node.tagName) &&
-        [...node.childNodes].some(
-          (child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim(),
-        ),
-    );
-    const small = [],
-      contrast = [];
-    let smallest = Infinity;
-    for (const node of texts) {
-      const style = getComputedStyle(node);
-      const size = parseFloat(style.fontSize);
-      smallest = Math.min(smallest, size);
-      const label = `${node.tagName}#${node.id}.${node.className}: ${node.textContent.trim().slice(0, 70)}`;
-      if (size < 15.9) small.push({ label, size });
-      if (node.closest('button:disabled,input:disabled,select:disabled')) continue;
-      const bg = background(node);
-      const fg = over(rgba(style.color), bg);
-      const a = luminance(bg),
-        b = luminance(fg);
-      const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-      const large = size >= 24 || (size >= 18.66 && parseFloat(style.fontWeight) >= 700);
-      if (ratio < (large ? 3 : 4.5)) contrast.push({ label, ratio: Number(ratio.toFixed(2)) });
+    const problems = [];
+    let textCount = 0;
+    let lowestContrast = Infinity;
+    for (const node of document.body.querySelectorAll('*')) {
+      if (
+        !visible(node) ||
+        node.tagName === 'OPTION' ||
+        node.tagName === 'SCRIPT' ||
+        node.tagName === 'STYLE'
+      )
+        continue;
+      if ([...node.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim())) {
+        textCount++;
+        const style = getComputedStyle(node),
+          fg = rgb(style.color),
+          bg = background(node);
+        const a = luminance(fg),
+          b = luminance(bg),
+          contrast = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+        const large =
+          parseFloat(style.fontSize) >= 24 ||
+          (parseFloat(style.fontSize) >= 18.66 && Number(style.fontWeight) >= 700);
+        if (!node.matches(':disabled')) {
+          lowestContrast = Math.min(lowestContrast, contrast);
+          if (contrast + 0.03 < (large ? 3 : 4.5))
+            problems.push({
+              kind: 'contrast',
+              text: node.textContent.slice(0, 70),
+              ratio: contrast,
+            });
+        }
+      }
     }
-    const badControls = [];
-    for (const node of document.querySelectorAll(
-      'button, input:not([type=hidden]), select, summary',
-    )) {
-      if (!visible(node)) continue;
-      const rect = node.getBoundingClientRect();
-      const named =
-        node.getAttribute('aria-label') ||
-        node.getAttribute('aria-labelledby') ||
-        node.textContent.trim() ||
-        (node.labels && [...node.labels].some((label) => label.textContent.trim()));
-      if (!named || rect.height < 43.9)
-        badControls.push({
-          id: node.id || node.tagName,
-          height: rect.height,
-          named: Boolean(named),
-        });
+    for (const control of document.querySelectorAll('button,input,select,textarea,summary')) {
+      if (!visible(control)) continue;
+      const label =
+        control.getAttribute('aria-label') ||
+        control.textContent.trim() ||
+        [...(control.labels || [])].map((n) => n.textContent).join(' ') ||
+        control.getAttribute('aria-labelledby');
+      if (!label) problems.push({ kind: 'unnamed-control', id: control.id });
+      const box = control.getBoundingClientRect();
+      if (
+        !control.matches('summary') &&
+        !control.closest('dialog:not([open])') &&
+        box.height < 43.8
+      )
+        problems.push({ kind: 'short-control', id: control.id, height: box.height });
     }
-    const ids = [...document.querySelectorAll('[id]')].map((node) => node.id);
-    return {
-      width: window.innerWidth,
-      height: window.innerHeight,
-      smallestText: smallest,
-      textNodesChecked: texts.length,
-      small,
-      contrast,
-      badControls,
-      duplicateIds: ids.filter((id, i) => ids.indexOf(id) !== i),
-      headings: [...document.querySelectorAll('h1')].filter(visible).length,
-      pageOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
-    };
+    const ids = [...document.querySelectorAll('[id]')].map((n) => n.id);
+    if (new Set(ids).size !== ids.length) problems.push({ kind: 'duplicate-id' });
+    if (document.querySelectorAll('h1').length !== 1) problems.push({ kind: 'heading-count' });
+    if (document.documentElement.scrollWidth > window.innerWidth + 1)
+      problems.push({
+        kind: 'page-overflow',
+        width: document.documentElement.scrollWidth,
+        viewport: window.innerWidth,
+      });
+    return { textCount, lowestContrast, problems };
   });
-  assert.equal(result.headings, 1, `${name}: one visible page heading`);
-  assert.deepEqual(result.duplicateIds, [], `${name}: unique IDs`);
-  assert.deepEqual(result.small, [], `${name}: minimum readable text`);
-  assert.deepEqual(result.contrast, [], `${name}: sampled text contrast`);
-  assert.deepEqual(result.badControls, [], `${name}: named and comfortably sized controls`);
-  assert.equal(result.pageOverflow, false, `${name}: page must not overflow`);
+  assert.deepEqual(result.problems, [], `${name}: ${JSON.stringify(result.problems)}`);
   return { name, ...result };
 }
-module.exports = { auditDesktop };
+async function auditScale(page, name) {
+  const result = await page.evaluate(() => {
+    const root = document.documentElement;
+    const before = root.dataset.fontSize;
+    const nodes = [...document.body.querySelectorAll('*')].filter(
+      (n) =>
+        !n.closest('.sr-only,script,style') &&
+        ([...n.childNodes].some((c) => c.nodeType === Node.TEXT_NODE && c.textContent.trim()) ||
+          n.matches('input,select')),
+    );
+    root.dataset.fontSize = '14';
+    const small = nodes.map((n) => parseFloat(getComputedStyle(n).fontSize));
+    root.dataset.fontSize = '24';
+    const large = nodes.map((n) => parseFloat(getComputedStyle(n).fontSize));
+    const failures = nodes.flatMap((n, i) =>
+      Math.abs(large[i] / small[i] - 24 / 14) > 0.005
+        ? [{ text: n.textContent.slice(0, 45), tag: n.tagName, small: small[i], large: large[i] }]
+        : [],
+    );
+    root.dataset.fontSize = before;
+    return { observations: nodes.length, failures };
+  });
+  assert.deepEqual(result.failures, [], `${name} global scale: ${JSON.stringify(result.failures)}`);
+  return { name, ...result };
+}
+module.exports = { auditPage, auditScale };

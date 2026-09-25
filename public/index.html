@@ -1,62 +1,52 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-font-size="17">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="Your local Codex usage workspace." />
     <title>Codex Report</title>
     <link rel="stylesheet" href="/style.css" />
     <script defer src="/app.js"></script>
   </head>
   <body>
     <a class="skip" href="#main">Skip to analytics</a>
-    <aside class="sidebar" aria-label="Workspace navigation">
-      <div class="brand">
-        <svg viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M10 5H5v22h5M22 5h5v22h-5M12 21v-5m4 5V10m4 11v-8" />
-        </svg>
-        <span>Codex Report</span>
+    <header class="workspace-header">
+      <div class="workspace-bar">
+        <a class="brand" href="#overview" aria-label="Codex Report overview">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M5 23V9m7 14V5m7 18v-9m7 9V9" />
+          </svg>
+          <span>Codex <strong>Report</strong></span>
+        </a>
+        <span class="workspace-label">Local workspace</span>
+        <div class="workspace-tools">
+          <span id="connection" class="live" role="status">Connecting</span>
+          <button id="open-commands" type="button" class="command-trigger" aria-haspopup="dialog">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10" cy="10" r="6" />
+              <path d="m15 15 5 5" />
+            </svg>
+            <span>Find anything</span><kbd>Ctrl K</kbd>
+          </button>
+        </div>
       </div>
-      <nav aria-label="Analytics views">
-        <button type="button" data-view="overview" class="selected" aria-current="page">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 0h7v7h-7z" /></svg
-          >Overview
+      <nav class="primary-nav" aria-label="Analytics views">
+        <button type="button" data-view="overview" aria-current="page" class="selected">
+          Overview
         </button>
-        <button type="button" data-view="sessions">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 4h16v13H9l-5 4V4zM8 8h8m-8 4h5" /></svg
-          >Sessions
-        </button>
-        <button type="button" data-view="limits">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 20V10m8 10V4m8 16v-7M2 20h20" /></svg
-          >Usage comparison
-        </button>
-        <button type="button" data-view="health">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3zM8 12l3 3 5-6" /></svg
-          >Data health
-        </button>
-        <button type="button" data-view="settings" class="settings-navigation">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 6h5m6 0h5M4 12h10m6 0h0M4 18h2m6 0h8" />
-            <circle cx="12" cy="6" r="3" />
-            <circle cx="17" cy="12" r="3" />
-            <circle cx="9" cy="18" r="3" /></svg
-          >Settings
-        </button>
+        <button type="button" data-view="sessions">Sessions</button>
+        <button type="button" data-view="limits">Usage comparison</button>
+        <button type="button" data-view="health">Data health</button>
+        <button type="button" data-view="settings">Settings</button>
+        <span class="nav-note">Your data stays on this computer</span>
       </nav>
-      <div class="sidebar-foot">
-        <div class="live" id="connection" role="status">Connecting</div>
-        <p>Stored on this computer.<br />No prompts or telemetry.</p>
-      </div>
-    </aside>
+    </header>
     <main id="main" tabindex="-1">
       <header class="page-header">
         <div class="page-heading">
           <h1 id="title" tabindex="-1">Overview</h1>
-          <p id="subtitle">Understand your usage without losing the detail.</p>
+          <p id="subtitle">A clear picture of the work behind your conversations.</p>
         </div>
         <div id="report-actions" class="header-actions">
           <button id="refresh" class="secondary" type="button">
@@ -64,9 +54,9 @@
               <path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" /></svg
             >Refresh
           </button>
-          <button id="download" class="secondary" type="button">
+          <button id="download" class="primary" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 3v12m-4-4 4 4 4-4M4 15v6h16v-6" /></svg
+              <path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5" /></svg
             >Export JSON
           </button>
         </div>
@@ -95,44 +85,58 @@
       <p id="period-info" class="period-info"></p>
       <div id="error" class="notice error hidden" role="alert"></div>
       <div id="failure" class="notice warning hidden" role="status"></div>
-      <section
-        id="session-controls"
-        class="session-controls hidden"
-        aria-label="Session search and pages"
-      >
+      <section id="session-controls" class="session-controls hidden" aria-label="Session controls">
         <label class="search-field" for="session-search"
-          >Find a session<input
+          >Search sessions<input
             id="session-search"
             type="search"
-            placeholder="Search by name, date, or session ID"
+            placeholder="Name, date, or session ID"
             autocomplete="off"
         /></label>
+        <label for="session-outcome"
+          >Turn outcome<select id="session-outcome">
+            <option value="all">All outcomes</option>
+            <option value="completed">Completed</option>
+            <option value="interrupted">Interrupted</option>
+            <option value="usageExceeded">Usage exceeded</option>
+            <option value="failed">Other failures</option>
+            <option value="other">Active / unknown</option>
+          </select></label
+        >
+        <label for="session-sort"
+          >Sort sessions<select id="session-sort">
+            <option value="recent">Recent activity</option>
+            <option value="oldest">Oldest first</option>
+            <option value="tokens">Most tokens</option>
+            <option value="cost">Highest priced subtotal</option>
+          </select></label
+        >
         <div class="pagination">
           <span id="sessions-count" class="note" aria-live="polite"></span>
-          <button id="sessions-prev" class="secondary" type="button">Previous</button>
-          <button id="sessions-next" class="secondary" type="button">Next</button>
+          <div>
+            <button id="sessions-prev" class="secondary" type="button">Previous</button
+            ><button id="sessions-next" class="secondary" type="button">Next</button>
+          </div>
         </div>
       </section>
       <section id="content" aria-label="Report content">
         <div class="loading" role="status">
           <h2>Opening your workspace</h2>
-          <p>Reading the local usage ledger.</p>
+          <p>Reading your local usage ledger.</p>
           <div class="skeleton" aria-hidden="true"></div>
         </div>
       </section>
       <footer class="page-footer">
-        <span id="freshness">Waiting for the collector.</span
-        ><span>API estimates are not billed charges.</span>
+        <span id="freshness">Waiting for the collector</span
+        ><span>API-equivalent estimates. Not billed charges.</span>
       </footer>
     </main>
     <dialog id="rename-dialog" aria-labelledby="rename-heading">
       <form id="rename-form">
         <h2 id="rename-heading">Name this session</h2>
-        <p class="description">
-          A label for this dashboard only. Your Codex conversation stays unchanged.
-        </p>
-        <label for="session-name">Session name</label>
-        <input
+        <p class="description">A local nickname. Your Codex conversation stays unchanged.</p>
+        <label for="session-name">Session name</label
+        ><input
           id="session-name"
           maxlength="120"
           autocomplete="off"
@@ -145,6 +149,33 @@
           ><button id="rename-save" class="primary" type="submit">Save name</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="command-dialog" class="command-dialog" aria-labelledby="command-heading">
+      <div class="command-head">
+        <h2 id="command-heading">Go anywhere</h2>
+        <button id="command-close" type="button" class="secondary">Close <kbd>Esc</kbd></button>
+      </div>
+      <label for="command-search" class="sr-only">Search pages and recorded sessions</label
+      ><input
+        id="command-search"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded="false"
+        aria-controls="command-results"
+        type="search"
+        autocomplete="off"
+        placeholder="Search pages or sessions in this selection..."
+        aria-describedby="command-help"
+      />
+      <div
+        id="command-results"
+        class="command-results"
+        role="listbox"
+        aria-label="Pages and sessions"
+      ></div>
+      <p id="command-help" class="note">
+        Arrow keys to choose. Enter to open. Sessions follow your current report filters.
+      </p>
     </dialog>
   </body>
 </html>

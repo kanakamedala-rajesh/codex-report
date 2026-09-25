@@ -3,39 +3,48 @@
 /** @typedef {import('../src/reports').Report} CodexReport */
 /** @typedef {import('../src/reports').TaskRow} Task */
 /** @typedef {import('../src/reports').SessionRow} Session */
+/** @typedef {import('../src/reports').Totals} Totals */
 /** @typedef {import('../src/settings').SettingsSnapshot} SettingsSnapshot */
-/** @typedef {import('../src/config').Account} Account */
 /** @typedef {import('../src/config').DashboardPreferences} DashboardPreferences */
+/** @typedef {{label:string, detail:string, run:()=>void}} Command */
 /** @param {string} id */
 function byId(id) {
-  const value = document.getElementById(id);
-  if (!value) throw new Error(`Missing element: ${id}`);
-  return value;
-}
-/** @param {string} id */
-function select(id) {
-  const value = byId(id);
-  if (!(value instanceof HTMLSelectElement)) throw new Error('Expected select');
-  return value;
+  const node = document.getElementById(id);
+  if (!node) throw new Error(`Missing element: ${id}`);
+  return node;
 }
 /** @param {string} id */
 function input(id) {
-  const value = byId(id);
-  if (!(value instanceof HTMLInputElement)) throw new Error('Expected input');
-  return value;
+  const node = byId(id);
+  if (!(node instanceof HTMLInputElement)) throw new Error('Expected input');
+  return node;
+}
+/** @param {string} id */
+function select(id) {
+  const node = byId(id);
+  if (!(node instanceof HTMLSelectElement)) throw new Error('Expected select');
+  return node;
 }
 /** @param {string} id */
 function button(id) {
-  const value = byId(id);
-  if (!(value instanceof HTMLButtonElement)) throw new Error('Expected button');
-  return value;
+  const node = byId(id);
+  if (!(node instanceof HTMLButtonElement)) throw new Error('Expected button');
+  return node;
 }
 /** @param {string} tag @param {string} [text] @param {string} [className] */
 function el(tag, text = '', className = '') {
-  const n = document.createElement(tag);
-  n.textContent = text;
-  if (className) n.className = className;
-  return n;
+  const node = document.createElement(tag);
+  node.textContent = text;
+  node.className = className;
+  return node;
+}
+/** @param {string} text @param {string} [className] */
+function action(text, className = 'secondary') {
+  const node = document.createElement('button');
+  node.type = 'button';
+  node.textContent = text;
+  node.className = className;
+  return node;
 }
 /** @param {number} n */
 function number(n) {
@@ -47,37 +56,71 @@ function number(n) {
 function precise(n) {
   return n.toLocaleString('en-US');
 }
-/** @param {string|null} t @param {string} [zone] */
-function date(t, zone) {
-  return t
-    ? new Date(t).toLocaleString(undefined, {
+/** @param {string|null} value @param {string} [zone] */
+function date(value, zone) {
+  if (!value) return 'Not recorded';
+  const time = new Date(value);
+  return Number.isNaN(time.getTime())
+    ? 'Not recorded'
+    : time.toLocaleString(undefined, {
         timeZone: zone || settingsState?.values.timezone || undefined,
+      });
+}
+/** @param {string|null} value */
+function shortDate(value) {
+  return value
+    ? new Date(value).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        timeZone: settingsState?.values.timezone,
       })
-    : 'Not recorded';
+    : 'Date not recorded';
+}
+/** @param {number} ms */
+function duration(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s >= 3600
+    ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+    : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+/** @param {Totals} totals */
+function estimate(totals) {
+  return !totals.requests
+    ? 'No usage recorded'
+    : totals.pricePico === null
+      ? 'Unpriced'
+      : `~${totals.apiEquivalent}`;
+}
+/** @param {Session} session */
+function sessionTitle(session) {
+  return session.name || `Session ${date(session.started)}`;
+}
+/** @param {unknown} value @returns {Record<string, unknown>} */
+function record(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? /** @type {Record<string,unknown>} */ (value)
+    : {};
 }
 /** @type {CodexReport|null} */
 let current = null;
+/** @type {SettingsSnapshot|null} */
+let settingsState = null;
 /** @type {Map<string, Task>} */
 let taskIndex = new Map();
+let view = 'overview';
+let revision = -1;
 let lastRefresh = 0;
-let view = 'overview',
-  revision = -1,
-  loading = false;
-const expanded = new Set();
+let loading = false;
+let refreshRequested = false;
+let navigationSequence = 0;
+let sessionQuery = '';
+let sessionPage = 0;
+let selectedSession = '';
+let selectedDay = '';
 let activityMode = 'days';
 let activityTableOpen = false;
 let diagnosticsOpen = false;
-let refreshRequested = false;
 let settingsSection = 'appearance';
-let navigationSequence = 0;
-/** @type {Map<string, boolean>} */
-const expandedSessions = new Map();
-/** @type {Map<string, number>} */
-const shownTurns = new Map();
-/** @type {SettingsSnapshot|null} */
-let settingsState = null;
-let sessionPage = 0;
-let sessionQuery = '';
 let settingsDirty = false;
 let billingDirty = false;
 let settingsSaving = false;
@@ -86,18 +129,35 @@ let billingLabel = '';
 let renameThread = '';
 let renameRevision = '';
 let renameSaving = false;
+/** @type {Set<string>} */
+const expanded = new Set();
+/** @type {Set<string>} */
+const expandedTechnical = new Set();
+/** @type {Map<string, number>} */
+const shownTurns = new Map();
 const renameDialog = /** @type {HTMLDialogElement} */ (byId('rename-dialog'));
+const commandDialog = /** @type {HTMLDialogElement} */ (byId('command-dialog'));
+/** @type {Command[]} */
+let commandEntries = [];
+let commandIndex = 0;
+/** @type {HTMLElement|null} */
+let commandReturnFocus = null;
+const pageNames = {
+  overview: 'Overview',
+  sessions: 'Sessions',
+  limits: 'Usage comparison',
+  health: 'Data health',
+  settings: 'Settings',
+};
 /** @param {string} theme */
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
 }
 /** @param {number|undefined} size */
 function applyFontSize(size) {
-  // An allowlisted attribute selects the root percentage in CSS: no inline style,
-  // page transform or browser-zoom override. Every text role is rooted in rem.
-  const value =
-    size !== undefined && Number.isInteger(size) && size >= 14 && size <= 24 ? size : 17;
-  document.documentElement.dataset.fontSize = String(value);
+  document.documentElement.dataset.fontSize = String(
+    size !== undefined && Number.isInteger(size) && size >= 14 && size <= 24 ? size : 17,
+  );
 }
 /** @param {DashboardPreferences} preferences */
 function applyAppearance(preferences) {
@@ -112,13 +172,26 @@ function showError(text) {
 /** @param {string} id @param {string} value @param {string} [label] */
 function setOption(id, value, label) {
   const node = select(id);
-  if (!Array.from(node.options).some((o) => o.value === value)) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label || value;
-    node.append(option);
+  if (![...node.options].some((o) => o.value === value)) {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label || value;
+    node.append(o);
   }
   node.value = value;
+}
+/** @param {string} url @param {RequestInit} [options] */
+async function get(url, options) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch(url, { cache: 'no-store', signal: controller.signal, ...options });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Local request failed.');
+    return result;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 /** @param {Record<string, unknown>} changes @param {string} expectedRevision */
 async function saveSettings(changes, expectedRevision) {
@@ -134,42 +207,16 @@ async function saveSettings(changes, expectedRevision) {
   revision = -1;
   return saved;
 }
-/** @param {Session} session */
-async function renameSession(session) {
-  if (renameDialog.open || renameSaving) return;
-  try {
-    const state = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
-    renameRevision = state.revision;
-    renameThread = session.id;
-    input('session-name').value = session.name || '';
-    byId('rename-error').textContent = '';
-    renameDialog.showModal();
-    input('session-name').focus();
-  } catch (e) {
-    showError(e instanceof Error ? e.message : String(e));
-  }
-}
-/** @param {string} url @param {RequestInit} [options] */
-async function get(url, options) {
-  const response = await fetch(url, { cache: 'no-store', ...options });
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error || 'Local request failed');
-  return value;
-}
-/** @param {string} label @param {string} value @param {string} sub @param {boolean} [money] */
-function card(label, value, sub, money = false) {
-  const node = el('div', '', 'card');
-  node.append(
-    el('div', label, 'label'),
-    el('div', value, money ? 'value money' : 'value'),
-    el('div', sub, 'sub'),
-  );
-  return node;
-}
 /** @param {string} title @param {string} description */
 function panel(title, description) {
   const node = el('section', '', 'panel');
   node.append(el('h2', title), el('p', description, 'description'));
+  return node;
+}
+/** @param {string} title @param {string} description */
+function emptyState(title, description) {
+  const node = el('div', '', 'empty');
+  node.append(el('h2', title), el('p', description));
   return node;
 }
 /** @param {string} label @param {string} value */
@@ -178,37 +225,14 @@ function datum(label, value) {
   node.append(el('div', label, 'label'), el('div', value, 'value'));
   return node;
 }
-/** @param {import('../src/reports').Totals} totals */
-function estimate(totals) {
-  if (!totals.requests) return 'No usage recorded';
-  return totals.pricePico === null ? 'Unpriced' : `~${totals.apiEquivalent}`;
-}
-/** @param {string} title @param {string} description */
-function emptyState(title, description) {
-  const node = el('div', '', 'empty');
-  node.append(el('h2', title), el('p', description));
-  return node;
-}
-/** @param {string} label @param {string} target */
-function viewLink(label, target) {
-  const node = el('button', label, 'secondary section-action');
-  node.setAttribute('type', 'button');
+/** @param {string} label @param {string} target @param {string} [section] */
+function viewLink(label, target, section) {
+  const node = action(label, 'text-button');
   node.addEventListener('click', () => {
+    if (target === 'settings' && section) settingsSection = section;
     void navigate(target);
   });
   return node;
-}
-/** @param {string} label @param {number} value @param {number} maximum @param {string} text */
-function bar(label, value, maximum, text) {
-  const row = el('div', '', 'bar-row');
-  const top = el('div', '', 'bar-top');
-  top.append(el('span', label), el('span', text));
-  const progress = document.createElement('progress');
-  progress.max = maximum || 1;
-  progress.value = value;
-  progress.setAttribute('aria-label', label);
-  row.append(top, progress);
-  return row;
 }
 /** @param {string} caption @param {string[]} headings @param {(string|HTMLElement)[][]} rows */
 function dataTable(caption, headings, rows) {
@@ -218,259 +242,101 @@ function dataTable(caption, headings, rows) {
   wrap.setAttribute('aria-label', caption);
   wrap.dataset.focusKey = `table-${caption}`;
   const table = document.createElement('table');
-  const cap = el('caption', caption, 'sr-only');
   const head = document.createElement('thead');
   const header = document.createElement('tr');
-  for (const label of headings) {
-    const th = document.createElement('th');
-    th.scope = 'col';
-    th.textContent = label;
-    header.append(th);
+  for (const heading of headings) {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = heading;
+    header.append(cell);
   }
   head.append(header);
   const body = document.createElement('tbody');
   for (const values of rows) {
-    const tr = document.createElement('tr');
-    for (const item of values) {
-      const td = document.createElement('td');
-      if (typeof item === 'string') td.textContent = item;
-      else td.append(item);
-      tr.append(td);
+    const row = document.createElement('tr');
+    for (const value of values) {
+      const cell = document.createElement('td');
+      if (typeof value === 'string') cell.textContent = value;
+      else cell.append(value);
+      row.append(cell);
     }
-    body.append(tr);
+    body.append(row);
   }
-  table.append(cap, head, body);
+  table.append(el('caption', caption, 'sr-only'), head, body);
   wrap.append(table);
   return wrap;
 }
-/** @param {string} name @param {Record<string,string|number>} [attributes] */
+/** @param {string} name @param {Record<string, string|number>} [attributes] */
 function svgElement(name, attributes = {}) {
   const node = document.createElementNS('http://www.w3.org/2000/svg', name);
   for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
   return node;
 }
-/** @param {number} ms */
-function duration(ms) {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  return seconds >= 3600
-    ? `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
-    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+/** @param {string} code @param {string} label */
+function badge(code, label) {
+  return el('span', label, `badge ${code}`);
 }
-/** @param {Session} session */
-function sessionTitle(session) {
-  return session.name || `Session ${date(session.started)}`;
+/** @param {string} label @param {number} value @param {number} maximum @param {string} text */
+function bar(label, value, maximum, text) {
+  const row = el('div', '', 'bar-row');
+  const title = el('div', '', 'bar-top');
+  title.append(el('span', label), el('span', text));
+  const progress = document.createElement('progress');
+  progress.max = maximum || 1;
+  progress.value = value;
+  progress.setAttribute('aria-label', label);
+  row.append(title, progress);
+  return row;
 }
-/** @param {Session} session */
-function sessionView(session) {
-  const tasks = session.turnIds
-    .map((id) => taskIndex.get(`${session.id}:${id}`))
-    .filter((task) => task !== undefined);
-  const details = document.createElement('details');
-  details.className = 'session';
-  details.dataset.session = session.id;
-  details.open = expandedSessions.get(session.id) ?? false;
-  details.addEventListener('toggle', () => {
-    if (details.isConnected) expandedSessions.set(session.id, details.open);
-  });
-  const summary = el('summary');
-  summary.dataset.focusKey = `session-${session.id}`;
-  const identity = el('div', '', 'session-identity');
-  identity.append(
-    el('span', sessionTitle(session), 'session-title'),
-    el(
-      'span',
-      session.name ? `Started ${date(session.started)}` : `Session ID ${session.id.slice(0, 8)}`,
-      'task-date',
-    ),
+/** @param {string} label @param {string} value @param {string} description @param {boolean} [copy] */
+function stat(label, value, description, copy = false) {
+  const node = el('div', '', 'summary-stat');
+  node.append(
+    el('div', label, 'label'),
+    el('div', value, `value${copy ? ' is-copy' : ''}`),
+    el('p', description, 'sub'),
   );
-  const counts = el('div', '', 'session-counts');
-  counts.append(el('strong', `${tasks.length} turn${tasks.length === 1 ? '' : 's'}`));
-  const outcome = session.outcomes;
-  const state = outcome.usageExceeded
-    ? `${outcome.usageExceeded} usage exceeded`
-    : outcome.failed
-      ? `${outcome.failed} failed`
-      : outcome.interrupted
-        ? `${outcome.interrupted} interrupted`
-        : outcome.other
-          ? 'Active / unknown'
-          : 'Completed';
-  counts.append(el('span', state, 'note'));
-  const cost = el('div', '', 'session-cost');
-  cost.append(
-    el(
-      'span',
-      estimate(session.totals),
-      session.totals.pricePico === null ? 'num no-estimate' : 'num',
-    ),
-    el(
-      'span',
-      session.totals.unpricedRequests
-        ? `${session.totals.unpricedRequests} requests unpriced`
-        : 'API estimate',
-      'note',
-    ),
-  );
-  summary.append(identity, counts, cost);
-  const body = el('div', '', 'session-body');
-  const meta = el('div', '', 'session-meta');
-  const rename = el('button', session.name ? 'Rename session' : 'Name session', 'secondary');
-  rename.setAttribute('type', 'button');
-  rename.dataset.focusKey = `rename-${session.id}`;
-  rename.addEventListener('click', () => {
-    void renameSession(session);
-  });
-  meta.append(el('span', `Last activity ${date(session.lastActivity)}`, 'note'), rename);
-  body.append(meta, el('p', 'These turns and their totals follow your current filters.', 'note'));
-  const outcomes = el('div', '', 'outcome-list');
-  for (const [count, label] of [
-    [outcome.completed, 'completed'],
-    [outcome.interrupted, 'interrupted'],
-    [outcome.usageExceeded, 'usage exceeded'],
-    [outcome.failed, 'failed'],
-    [outcome.other, 'active / unknown'],
-  ]) {
-    if (count) outcomes.append(el('span', `${count} ${label}`));
-  }
-  const limit = shownTurns.get(session.id) ?? 50;
-  for (const task of tasks.slice(-limit)) body.append(taskView(task));
-  if (tasks.length > limit) {
-    const more = el(
-      'button',
-      `Show ${Math.min(50, tasks.length - limit)} earlier turns`,
-      'secondary',
-    );
-    more.setAttribute('type', 'button');
-    more.dataset.focusKey = `more-${session.id}`;
-    more.addEventListener('click', () => {
-      shownTurns.set(session.id, limit + 50);
-      expandedSessions.set(session.id, true);
-      if (current) render(current);
-    });
-    body.append(more);
-  }
-  body.append(outcomes);
-  const technical = document.createElement('details');
-  technical.className = 'technical';
-  technical.append(el('summary', 'Full session ID'), el('code', session.id));
-  body.append(technical);
-  details.append(summary, body);
-  return details;
-}
-/** @param {Task} task @param {boolean} [showSession] */
-function taskView(task, showSession = false) {
-  const details = document.createElement('details');
-  details.className = 'task';
-  const key = `${task.thread}:${task.turn}`;
-  details.dataset.task = key;
-  details.open = expanded.has(key);
-  details.addEventListener('toggle', () => {
-    if (!details.isConnected) return;
-    if (details.open) expanded.add(key);
-    else expanded.delete(key);
-  });
-  const summary = el('summary');
-  summary.dataset.focusKey = `turn-${key}`;
-  const identity = el('div');
-  identity.append(
-    el('span', `Turn ${task.number ?? task.turn.slice(0, 8)}`, 'task-title'),
-    el(
-      'span',
-      `${date(task.started)}${task.durationMs === null ? '' : ` / ${duration(task.durationMs)}`}`,
-      'task-date',
-    ),
-  );
-  if (showSession)
-    identity.append(
-      el(
-        'span',
-        current?.sessions.find((s) => s.id === task.thread)?.name ||
-          `Session ${task.thread.slice(0, 8)}`,
-        'task-date',
-      ),
-    );
-  summary.append(
-    identity,
-    el('span', task.displayOutcome.label, `badge ${task.displayOutcome.code}`),
-    el('span', estimate(task.totals), 'num'),
-  );
-  const body = el('div', '', 'details');
-  const grid = el('div', '', 'detail-grid');
-  for (const [label, value] of [
-    ['Input tokens', precise(task.totals.input)],
-    ['Cached input', precise(task.totals.cached)],
-    ['Output tokens', precise(task.totals.output)],
-    ['Reasoning within output', precise(task.totals.reasoning)],
-    ['Model requests', precise(task.totals.requests)],
-    ['Linked agents', `${task.workers} workers / ${task.reviewers} reviews`],
-  ])
-    grid.append(datum(label, value));
-  body.append(
-    grid,
-    el(
-      'p',
-      task.models.length
-        ? `Models: ${task.models.join(', ')}`
-        : 'Model information was not recorded.',
-      'note',
-    ),
-  );
-  if (task.durationMs !== null)
-    body.append(el('p', 'Elapsed time includes tool activity and approval waits.', 'note'));
-  if (task.collectionPending)
-    body.append(el('p', 'Collection is catching up for this turn.', 'notice warning'));
-  if (task.error) body.append(el('p', `Recorded reason: ${task.error}`, 'notice warning'));
-  if (task.totals.unpricedRequests)
-    body.append(
-      el(
-        'p',
-        'Not priced: ' +
-          Object.entries(task.unpriced)
-            .map(([model, count]) => `${count} ${model} request${count === 1 ? '' : 's'}`)
-            .join('; ') +
-          '. The estimate includes priced requests only.',
-        'notice',
-      ),
-    );
-  const technical = document.createElement('details');
-  technical.className = 'technical';
-  technical.append(
-    el('summary', 'Request identifiers'),
-    el('code', `${task.thread} / ${task.turn}`),
-  );
-  body.append(technical);
-  details.append(summary, body);
-  return details;
+  return node;
 }
 /** @param {CodexReport} report */
-function modelTable(report) {
-  return dataTable(
-    'Model usage in the selected period',
-    ['Model', 'Requests', 'Processed tokens', 'API estimate'],
-    report.models.map((model) => {
-      const name = el('div');
-      name.append(el('span', model.name, 'model-name'));
-      if (model.totals.unpricedRequests)
-        name.append(
-          el('span', `${precise(model.totals.unpricedRequests)} requests unpriced`, 'model-meta'),
-        );
-      return [
-        name,
-        precise(model.totals.requests),
-        precise(model.totals.processed),
-        estimate(model.totals),
-      ];
-    }),
+function summaryView(report) {
+  const t = report.totals;
+  const ribbon = el('section', '', 'summary-ribbon');
+  ribbon.setAttribute('aria-label', 'Selected period totals');
+  ribbon.append(
+    stat(
+      'API-equivalent',
+      estimate(t),
+      t.unpricedRequests
+        ? `${precise(t.unpricedRequests)} requests not priced`
+        : t.requests
+          ? 'Priced usage, not billed charges'
+          : 'Choose another period to explore',
+      t.pricePico === null,
+    ),
+    stat('Processed tokens', number(t.processed), 'Input + output across requests'),
+    stat(
+      'Cached input',
+      t.cachePercent === null ? 'Not recorded' : `${t.cachePercent.toFixed(1)}%`,
+      `${number(t.cached)} of ${number(t.input)} input tokens`,
+      t.cachePercent === null,
+    ),
+    stat(
+      'Model requests',
+      precise(t.requests),
+      `${precise(report.statistics.tasks)} turns across ${precise(report.sessions.length)} sessions`,
+    ),
   );
+  return ribbon;
 }
 /** @param {CodexReport} report */
 function activityView(report) {
-  const section = el('section', '', 'panel');
+  const section = el('section', '', 'panel activity-board');
   const heading = el('div', '', 'list-heading');
   const identity = el('div');
   identity.append(
-    el('h2', 'Usage breakdown'),
-    el('p', 'See where your recorded tokens went.', 'description'),
+    el('h2', 'Activity'),
+    el('p', 'The shape of your recorded workload.', 'description'),
   );
   const tabs = el('div', '', 'section-tabs');
   tabs.setAttribute('role', 'group');
@@ -479,8 +345,7 @@ function activityView(report) {
     ['days', 'By day'],
     ['models', 'By model'],
   ]) {
-    const tab = el('button', label);
-    tab.setAttribute('type', 'button');
+    const tab = action(label);
     tab.setAttribute('aria-pressed', String(activityMode === code));
     tab.dataset.focusKey = `activity-${code}`;
     tab.addEventListener('click', () => {
@@ -492,23 +357,44 @@ function activityView(report) {
   heading.append(identity, tabs);
   section.append(heading);
   if (activityMode === 'models') {
-    if (report.models.length) section.append(modelTable(report));
+    if (!report.models.length)
+      section.append(
+        emptyState('No model records', 'Model details appear after usage is collected.'),
+      );
     else
       section.append(
-        emptyState('No model records yet', 'Model details appear after usage is collected.'),
+        dataTable(
+          'Model usage in the selected period',
+          ['Model', 'Requests', 'Tokens', 'API estimate'],
+          report.models.map((m) => {
+            const name = el('div');
+            name.append(el('span', m.name, 'model-name'));
+            if (m.totals.unpricedRequests)
+              name.append(
+                el('span', `${precise(m.totals.unpricedRequests)} unpriced`, 'model-meta'),
+              );
+            return [
+              name,
+              precise(m.totals.requests),
+              precise(m.totals.processed),
+              estimate(m.totals),
+            ];
+          }),
+        ),
       );
     return section;
   }
-  const days = report.days.slice(-7);
+  const days = report.days.slice(-10);
   if (!days.length) {
     section.append(
       emptyState(
-        'No activity for these filters',
-        'Try Recorded lifetime, or run codex-report sync to import retained sessions.',
+        'Your activity will appear here',
+        'Keep the collector running while you use Codex, or import retained history with codex-report sync.',
       ),
     );
     return section;
   }
+  if (!days.some((day) => day.day === selectedDay)) selectedDay = days[days.length - 1].day;
   const legend = el('div', '', 'chart-legend');
   for (const [label, kind] of [
     ['Cached input', 'cached'],
@@ -521,241 +407,507 @@ function activityView(report) {
     item.prepend(swatch);
     legend.append(item);
   }
-  section.append(legend);
-  const maximum = Math.max(1, ...days.map((day) => day.totals.processed));
+  const plot = el('div', '', 'daily-plot');
+  plot.setAttribute('role', 'group');
+  plot.setAttribute('aria-label', 'Select a recorded day');
+  const maximum = Math.max(1, ...days.map((d) => d.totals.processed));
   for (const day of days) {
-    const row = el('div', '', 'activity-row');
-    const dateLabel = new Date(`${day.day}T12:00:00Z`).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      timeZone: 'UTC',
-    });
+    const column = action('', 'day-button');
+    column.dataset.focusKey = `day-${day.day}`;
+    column.dataset.day = day.day;
+    column.setAttribute('aria-pressed', String(selectedDay === day.day));
+    column.setAttribute(
+      'aria-label',
+      `${day.day}, ${precise(day.totals.processed)} processed tokens. Inspect this day.`,
+    );
     const graph = svgElement('svg', {
-      viewBox: '0 0 1000 20',
+      viewBox: '0 0 48 180',
       preserveAspectRatio: 'none',
-      role: 'img',
-      'aria-label': `${day.day}: ${precise(day.totals.cached)} cached input, ${precise(day.totals.input - day.totals.cached)} other input, ${precise(day.totals.output)} output tokens`,
-      class: 'activity-track',
+      'aria-hidden': 'true',
     });
-    let left = 0;
-    for (const [amount, kind] of [
+    let y = 180;
+    for (const [count, kind] of [
       [day.totals.cached, 'cached'],
       [day.totals.input - day.totals.cached, 'fresh'],
       [day.totals.output, 'output'],
     ]) {
-      const width = (Number(amount) / maximum) * 1000;
-      graph.append(svgElement('rect', { x: left, y: 0, width, height: 20, class: String(kind) }));
-      left += width;
+      const height = (Number(count) / maximum) * 174;
+      y -= height;
+      graph.append(
+        svgElement('rect', { x: 6, y, width: 36, height, rx: 1.4, class: String(kind) }),
+      );
     }
-    row.append(
-      el('span', dateLabel),
-      graph,
-      el('span', `${number(day.totals.processed)} tokens`, 'activity-total'),
-    );
-    section.append(row);
+    const label = new Date(`${day.day}T12:00:00Z`).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    });
+    column.append(graph, el('span', label, 'day-label'));
+    column.addEventListener('click', () => {
+      selectedDay = day.day;
+      if (current) render(current);
+    });
+    plot.append(column);
   }
-  section.append(
-    el(
-      'p',
-      `${days.length < report.days.length ? `Latest ${days.length} of ${report.days.length}` : days.length} recorded days. Gaps in history are not treated as zero usage.`,
-      'chart-note',
-    ),
+  const chosen = days.find((d) => d.day === selectedDay) || days[days.length - 1];
+  const readout = el('div', '', 'daily-readout');
+  readout.setAttribute('role', 'status');
+  readout.append(
+    el('strong', chosen.day),
+    el('span', `${precise(chosen.totals.input)} input`),
+    el('span', `${precise(chosen.totals.output)} output`),
+    el('span', `${estimate(chosen.totals)}${chosen.totals.unpricedRequests ? ' (partial)' : ''}`),
   );
-  const details = document.createElement('details');
-  details.className = 'chart-data';
-  details.open = activityTableOpen;
-  details.addEventListener('toggle', () => {
-    if (details.isConnected) activityTableOpen = details.open;
+  const exact = document.createElement('details');
+  exact.className = 'chart-data';
+  exact.open = activityTableOpen;
+  exact.addEventListener('toggle', () => {
+    if (exact.isConnected) activityTableOpen = exact.open;
   });
-  const toggle = el('summary', 'View exact values for all recorded days');
+  const toggle = el('summary', 'View exact daily values');
   toggle.dataset.focusKey = 'chart-data';
-  details.append(
+  exact.append(
     toggle,
     dataTable(
       'Exact daily token usage',
       ['Day', 'Cached input', 'Other input', 'Output', 'Total'],
-      report.days.map((day) => [
-        day.day,
-        precise(day.totals.cached),
-        precise(day.totals.input - day.totals.cached),
-        precise(day.totals.output),
-        precise(day.totals.processed),
+      report.days.map((d) => [
+        d.day,
+        precise(d.totals.cached),
+        precise(d.totals.input - d.totals.cached),
+        precise(d.totals.output),
+        precise(d.totals.processed),
       ]),
     ),
   );
-  section.append(details);
+  section.append(
+    legend,
+    plot,
+    readout,
+    el(
+      'p',
+      `Latest ${days.length} recorded days. Equal spacing; missing days are not counted as zero.`,
+      'chart-note',
+    ),
+    exact,
+  );
   return section;
 }
-/** @param {unknown} value @returns {Record<string,unknown>} */
-function record(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? /** @type {Record<string,unknown>} */ (value)
-    : {};
+/** @param {CodexReport} report */
+function workflowView(report) {
+  const rail = el('aside', '', 'insight-rail');
+  rail.setAttribute('aria-label', 'Workflow and pricing');
+  const flow = el('section', '', 'panel');
+  const head = el('div', '', 'workflow-title');
+  head.append(
+    el('h2', 'Your workflow'),
+    el('span', precise(report.statistics.tasks), 'workflow-count'),
+  );
+  flow.append(head);
+  for (const [n, label, code] of [
+    [report.statistics.completed, 'Completed', 'completed'],
+    [report.statistics.interrupted, 'Interrupted', 'interrupted'],
+    [report.statistics.usageExceeded, 'Usage exceeded', 'usage-exceeded'],
+    [report.statistics.otherFailed, 'Other failures', 'failed'],
+    [
+      Math.max(
+        0,
+        report.statistics.tasks -
+          report.statistics.completed -
+          report.statistics.interrupted -
+          report.statistics.failed,
+      ),
+      'Active / unknown',
+      'unknown',
+    ],
+  ]) {
+    if (code === 'unknown' && !n) continue;
+    const row = el('div', '', 'outcome-row');
+    const name = el('span', String(label), 'outcome-label');
+    const dot = el('i', '', `status-dot ${code}`);
+    dot.setAttribute('aria-hidden', 'true');
+    name.prepend(dot);
+    row.append(name, el('strong', precise(Number(n)), 'num'));
+    flow.append(row);
+  }
+  const coverage = el('section', '', 'panel coverage-panel');
+  coverage.append(el('h2', 'Pricing coverage'));
+  const t = report.totals;
+  coverage.append(
+    el(
+      'div',
+      t.requests
+        ? `${((t.pricedRequests / t.requests) * 100).toFixed(1)}% priced`
+        : 'No requests yet',
+      'big-inline',
+    ),
+  );
+  if (t.requests)
+    coverage.append(
+      bar(
+        'Requests with a recorded price',
+        t.pricedRequests,
+        t.requests,
+        `${precise(t.pricedRequests)} / ${precise(t.requests)}`,
+      ),
+    );
+  coverage.append(
+    el(
+      'p',
+      t.unpricedRequests
+        ? `${precise(t.unpricedRequests)} requests are recorded without an API rate. They remain in token totals.`
+        : t.requests
+          ? 'Every request in this selection has a stored price. Estimates are not subscription charges.'
+          : 'Price coverage appears when requests are recorded.',
+      'note',
+    ),
+    viewLink('Review data health', 'health'),
+  );
+  rail.append(flow, coverage);
+  return rail;
+}
+/** @param {Session} session */
+function openSession(session) {
+  selectedSession = session.id;
+  sessionQuery = '';
+  input('session-search').value = '';
+  select('session-outcome').value = 'all';
+  select('session-sort').value = 'recent';
+  const i = current?.sessions.findIndex((s) => s.id === session.id) ?? 0;
+  sessionPage = Math.floor(
+    Math.max(0, i) / (settingsState?.values.dashboard.sessionsPerPage || 20),
+  );
+  void navigate('sessions');
 }
 /** @param {CodexReport} report */
-function healthView(report) {
-  const collection = record(report.health.collection);
-  const attention = Boolean(
-    collection.pending || collection.partial || collection.failed || collection.missing,
+function recentSessions(report) {
+  const section = el('section', '', 'panel');
+  const heading = el('div', '', 'list-heading');
+  const name = el('div');
+  name.append(
+    el('h2', 'Recent conversations'),
+    el('p', 'Start with a session. Follow every turn.', 'description'),
   );
-  const section = panel('Collection status', 'The latest scan of your local session records.');
-  const state = el('div', '', `health-state${attention ? ' attention' : ''}`);
-  const copy = el('div');
-  copy.append(
+  heading.append(name, viewLink('Explore all sessions', 'sessions'));
+  section.append(heading);
+  if (!report.sessions.length)
+    section.append(
+      emptyState(
+        'No sessions for these filters',
+        'Choose Recorded lifetime or import retained Codex history.',
+      ),
+    );
+  else
+    section.append(
+      dataTable(
+        'Recent sessions in this selection',
+        ['Session', 'Turns', 'Tokens', 'API estimate'],
+        report.sessions.slice(0, 5).map((s) => {
+          const identity = el('div');
+          const link = action(s.name || `Session ${shortDate(s.started)}`, 'table-link');
+          link.dataset.focusKey = `recent-${s.id}`;
+          link.addEventListener('click', () => openSession(s));
+          identity.append(link, el('span', date(s.lastActivity), 'table-date'));
+          const price = el('div', estimate(s.totals), 'num');
+          if (s.totals.unpricedRequests)
+            price.append(
+              el('span', `${precise(s.totals.unpricedRequests)} unpriced`, 'model-meta'),
+            );
+          return [identity, precise(s.turnIds.length), number(s.totals.processed), price];
+        }),
+      ),
+    );
+  return section;
+}
+/** @param {string} key @param {string} title @param {string} text */
+function technicalView(key, title, text) {
+  const node = document.createElement('details');
+  node.className = 'technical';
+  node.open = expandedTechnical.has(key);
+  const summary = el('summary', title);
+  summary.dataset.focusKey = `technical-${key}`;
+  node.append(summary, el('code', text));
+  node.addEventListener('toggle', () => {
+    if (!node.isConnected) return;
+    if (node.open) expandedTechnical.add(key);
+    else expandedTechnical.delete(key);
+  });
+  return node;
+}
+/** @param {Task} task */
+function taskView(task) {
+  const key = `${task.thread}:${task.turn}`;
+  const node = document.createElement('details');
+  node.className = 'task';
+  node.dataset.task = key;
+  node.open = expanded.has(key);
+  node.addEventListener('toggle', () => {
+    if (!node.isConnected) return;
+    if (node.open) expanded.add(key);
+    else expanded.delete(key);
+  });
+  const summary = el('summary');
+  summary.dataset.focusKey = `turn-${key}`;
+  const identity = el('div');
+  identity.append(
+    el('span', `Turn ${task.number ?? task.turn.slice(0, 8)}`, 'task-title'),
     el(
-      'strong',
-      !Object.keys(collection).length
-        ? 'Waiting for the first scan'
-        : attention
-          ? 'Some records need attention'
-          : 'Latest scan completed',
+      'span',
+      task.durationMs === null
+        ? date(task.started)
+        : `${shortDate(task.started)} / ${duration(task.durationMs)}`,
+      'task-date',
+    ),
+  );
+  const price = el('span', estimate(task.totals), 'num');
+  if (task.totals.pricePico !== null && task.totals.unpricedRequests)
+    price.append(el('small', `${precise(task.totals.unpricedRequests)} unpriced`, 'partial-price'));
+  summary.append(identity, badge(task.displayOutcome.code, task.displayOutcome.label), price);
+  const body = el('div', '', 'details');
+  const grid = el('div', '', 'detail-grid');
+  for (const [label, value] of [
+    ['Input tokens', precise(task.totals.input)],
+    ['Cached input', precise(task.totals.cached)],
+    ['Output tokens', precise(task.totals.output)],
+    ['Reasoning in output', precise(task.totals.reasoning)],
+    ['Model requests', precise(task.totals.requests)],
+    ['Linked agents', `${task.workers} workers / ${task.reviewers} reviews`],
+  ])
+    grid.append(datum(label, value));
+  body.append(
+    grid,
+    el(
+      'p',
+      `Started ${date(task.started)}${task.ended ? ` / Ended ${date(task.ended)}` : ''}`,
+      'note',
     ),
     el(
       'p',
-      typeof collection.at === 'string'
-        ? `Last scan ${date(collection.at)}`
-        : 'Start the collector or run codex-report sync.',
+      task.models.length ? `Models: ${task.models.join(', ')}` : 'Model not recorded.',
       'note',
     ),
   );
-  state.append(copy);
-  section.append(state);
-  const stats = el('div', '', 'health-stats');
-  for (const [key, label] of [
-    ['files', 'Files checked'],
-    ['added', 'New requests'],
-    ['partial', 'Partial files'],
-    ['failed', 'Failed files'],
-    ['missing', 'Missing sources'],
-  ])
-    stats.append(
-      datum(
-        label,
-        typeof collection[key] === 'number'
-          ? precise(/** @type {number} */ (collection[key]))
-          : 'Not recorded',
-      ),
-    );
-  section.append(stats);
-  const pricing = panel(
-    'Pricing coverage',
-    'Missing rates affect dollar estimates, not your recorded token counts.',
+  if (task.efforts.length)
+    body.append(el('p', `Reasoning settings: ${task.efforts.join(', ')}`, 'note'));
+  body.append(
+    el(
+      'p',
+      'Reasoning is included in output. Elapsed time includes tools and approval waits.',
+      'note',
+    ),
   );
-  const list = el('div', '', 'workload-list');
-  list.append(
-    datum('Priced requests', precise(report.totals.pricedRequests)),
-    datum('Unpriced requests', precise(report.totals.unpricedRequests)),
-  );
-  pricing.append(list);
-  const missing = report.models.filter((model) => model.totals.unpricedRequests);
-  for (const model of missing) {
-    const row = el('div', '', 'issue-row');
-    row.append(
-      el('span', model.name),
-      el('span', `${precise(model.totals.unpricedRequests)} requests`, 'note'),
-    );
-    pricing.append(row);
-  }
-  if (!missing.length)
-    pricing.append(
+  if (task.collectionPending)
+    body.append(el('p', 'Collection is catching up for this turn.', 'notice warning'));
+  if (task.error) body.append(el('p', `Recorded reason: ${task.error}`, 'notice warning'));
+  if (task.totals.unpricedRequests)
+    body.append(
       el(
         'p',
-        report.totals.requests
-          ? 'All requests in this selection have a recorded price.'
-          : 'No requests in this selection yet.',
-        'note',
+        'Unpriced: ' +
+          Object.entries(task.unpriced)
+            .map(([m, count]) => `${count} ${m} requests`)
+            .join('; ') +
+          '. The estimate includes priced requests only.',
+        'notice',
       ),
     );
-  const grid = el('div', '', 'grid-two');
-  grid.append(section, pricing);
-  const issues = panel(
-    'Recorded issues',
-    'Ledger diagnostics are separate from quota failures in individual sessions.',
+  body.append(technicalView(key, 'Request identifiers', `${task.thread} / ${task.turn}`));
+  node.append(summary, body);
+  return node;
+}
+/** @param {Session} session */
+function sessionDetail(session) {
+  const section = el('section', '', 'panel session-detail');
+  section.setAttribute('aria-label', 'Selected session');
+  section.dataset.session = session.id;
+  const heading = el('div', '', 'session-heading');
+  const name = el('div');
+  const title = el('h2', sessionTitle(session));
+  title.id = 'session-detail-title';
+  name.append(title, el('p', `Started ${date(session.started)}`, 'description'));
+  const rename = action(session.name ? 'Rename session' : 'Name session');
+  rename.dataset.focusKey = `rename-${session.id}`;
+  rename.addEventListener('click', () => {
+    void renameSession(session);
+  });
+  heading.append(name, rename);
+  const totals = el('div', '', 'session-summary');
+  totals.append(
+    datum('API-equivalent', estimate(session.totals)),
+    datum('Processed tokens', number(session.totals.processed)),
+    datum('Model requests', precise(session.totals.requests)),
   );
-  const observations = Array.isArray(report.health.issues) ? report.health.issues.map(record) : [];
-  for (const observation of observations) {
-    const row = el('div', '', 'issue-row');
-    const name = el('div');
-    name.append(
-      el('span', String(observation.code || 'Unclassified')),
+  section.append(heading, totals);
+  if (session.totals.unpricedRequests)
+    section.append(
+      el(
+        'p',
+        `${precise(session.totals.unpricedRequests)} requests have no recorded API rate. The estimate covers priced requests only.`,
+        'pricing-qualification',
+      ),
+    );
+  const o = session.outcomes;
+  const outcomes = el('div', '', 'outcome-list');
+  for (const [n, text, code] of [
+    [o.completed, 'completed', 'completed'],
+    [o.interrupted, 'interrupted', 'interrupted'],
+    [o.usageExceeded, 'usage exceeded', 'usage-exceeded'],
+    [o.failed, 'failed', 'failed'],
+    [o.other, 'active / unknown', 'unknown'],
+  ])
+    if (n) outcomes.append(badge(String(code), `${n} ${text}`));
+  section.append(
+    outcomes,
+    el('p', 'Values include linked agent work and follow the current report filters.', 'note'),
+  );
+  const tasks = session.turnIds
+    .map((id) => taskIndex.get(`${session.id}:${id}`))
+    .filter((t) => t !== undefined);
+  const turnsHead = el('div', '', 'turn-heading');
+  turnsHead.append(el('h3', 'Turn timeline'), el('span', `${tasks.length} turns`, 'note'));
+  section.append(turnsHead);
+  const limit = shownTurns.get(session.id) || 50;
+  for (const task of tasks.slice(-limit)) section.append(taskView(task));
+  if (tasks.length > limit) {
+    const more = action(`Show ${Math.min(50, tasks.length - limit)} earlier turns`);
+    more.dataset.focusKey = 'more-turns';
+    more.addEventListener('click', () => {
+      shownTurns.set(session.id, limit + 50);
+      if (current) render(current);
+    });
+    section.append(more);
+  }
+  section.append(technicalView(session.id, 'Full session ID', session.id));
+  return section;
+}
+/** @param {CodexReport} report */
+function sessionsView(report) {
+  const query = sessionQuery.trim().toLocaleLowerCase();
+  const outcome = select('session-outcome').value;
+  const rows = report.sessions.filter(
+    (s) =>
+      [s.id, s.name || '', date(s.started)].some((v) => v.toLocaleLowerCase().includes(query)) &&
+      (outcome === 'all' || s.outcomes[/** @type {keyof Session['outcomes']} */ (outcome)] > 0),
+  );
+  const order = select('session-sort').value;
+  rows.sort((a, b) => {
+    if (order === 'tokens')
+      return b.totals.processed - a.totals.processed || a.id.localeCompare(b.id);
+    if (order === 'cost') {
+      const av = a.totals.pricePico === null ? -1n : BigInt(a.totals.pricePico);
+      const bv = b.totals.pricePico === null ? -1n : BigInt(b.totals.pricePico);
+      return av < bv ? 1 : av > bv ? -1 : a.id.localeCompare(b.id);
+    }
+    return order === 'oldest'
+      ? a.started.localeCompare(b.started)
+      : b.lastActivity.localeCompare(a.lastActivity);
+  });
+  const pageSize = settingsState?.values.dashboard.sessionsPerPage || 20;
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  sessionPage = Math.min(sessionPage, pages - 1);
+  const visible = rows.slice(sessionPage * pageSize, (sessionPage + 1) * pageSize);
+  button('sessions-prev').disabled = sessionPage === 0;
+  button('sessions-next').disabled = sessionPage === pages - 1;
+  byId('sessions-count').textContent =
+    `${rows.length} sessions / Page ${sessionPage + 1} of ${pages}`;
+  if (!visible.length)
+    return emptyState(
+      'No matching sessions',
+      query || outcome !== 'all'
+        ? 'Clear the search or choose All outcomes to see more conversations.'
+        : 'Try Recorded lifetime or run codex-report sync to import retained history.',
+    );
+  if (!visible.some((s) => s.id === selectedSession)) selectedSession = visible[0].id;
+  const shell = el('div', '', 'session-explorer');
+  const list = el('div', '', 'session-list');
+  list.setAttribute('role', 'group');
+  list.setAttribute('aria-label', 'Choose a session');
+  list.dataset.scrollKey = 'session-list';
+  for (const session of visible) {
+    const choice = action('', 'session-choice');
+    choice.dataset.sessionId = session.id;
+    choice.dataset.focusKey = `choose-${session.id}`;
+    choice.setAttribute('aria-pressed', String(session.id === selectedSession));
+    choice.setAttribute('aria-controls', 'session-inspector');
+    choice.append(
+      el('span', session.name || `Session ${shortDate(session.started)}`, 'session-name'),
+      el('span', date(session.started), 'session-date'),
+    );
+    const meta = el('span', '', 'session-mini');
+    meta.append(
+      el('span', `${session.turnIds.length} turns`),
       el(
         'span',
-        typeof observation.latest === 'string' ? date(observation.latest) : 'Time not recorded',
-        'task-date',
+        `${estimate(session.totals)}${session.totals.pricePico !== null && session.totals.unpricedRequests ? ' (partial)' : ''}`,
+        'num',
       ),
     );
-    row.append(name, el('span', `${String(observation.observations ?? '?')} observations`, 'note'));
-    issues.append(row);
+    choice.append(meta);
+    choice.addEventListener('click', () => {
+      selectedSession = session.id;
+      if (current) render(current);
+    });
+    list.append(choice);
   }
-  if (!observations.length) issues.append(el('p', 'No issues recorded in the ledger.', 'note'));
-  const technical = document.createElement('details');
-  technical.className = 'diagnostics';
-  technical.open = diagnosticsOpen;
-  technical.addEventListener('toggle', () => {
-    if (technical.isConnected) diagnosticsOpen = technical.open;
-  });
-  const toggle = el('summary', 'Technical diagnostics and source details');
-  toggle.dataset.focusKey = 'diagnostics';
-  technical.append(toggle, el('pre', JSON.stringify(report.health, null, 2)));
-  const group = el('div', '', 'health-page');
-  group.append(grid, issues, technical);
-  return group;
+  const selected = visible.find((s) => s.id === selectedSession) || visible[0];
+  const detail = sessionDetail(selected);
+  detail.id = 'session-inspector';
+  shell.append(list, detail);
+  return shell;
 }
 /** @param {CodexReport} report */
 function comparisonView(report) {
   const grid = el('div', '', 'comparison-grid');
-  const snapshots = panel(
-    'Provider quota snapshots',
-    'Last observed in Codex records. These are not live account checks.',
+  const quota = panel(
+    'Provider snapshots',
+    'What Codex last recorded. These observations are not live account checks.',
   );
-  for (const quota of report.quotas) {
-    const item = el('div', '', 'quota');
-    const minutes = Number(quota.minutes);
+  for (const q of report.quotas) {
+    const block = el('div', '', 'quota');
+    const minutes = Number(q.minutes);
     const windowName =
       Number.isFinite(minutes) && minutes > 0
-        ? minutes >= 1440 && minutes % 1440 === 0
+        ? minutes % 1440 === 0
           ? `${minutes / 1440}-day window`
           : `${minutes / 60}-hour window`
-        : String(quota.window || 'Unknown window');
-    const title = el('div');
-    title.append(
-      el('h3', windowName),
-      el('p', `Limit: ${String(quota.limitId || 'Unknown')}`, 'note'),
+        : String(q.window || 'Unknown window');
+    const head = el('div', '', 'quota-head');
+    const label = el('div');
+    label.append(el('h3', windowName), el('p', `Limit: ${String(q.limitId || 'Unknown')}`, 'note'));
+    head.append(
+      label,
+      el('span', typeof q.used === 'number' ? `${q.used}%` : 'Unknown', 'percent'),
     );
-    const heading = el('div', '', 'quota-head');
-    heading.append(
-      title,
-      el('span', typeof quota.used === 'number' ? `${quota.used}%` : 'Unknown', 'percent'),
+    block.append(head);
+    if (typeof q.used === 'number')
+      block.append(bar('Recorded allowance used', q.used, 100, 'of window'));
+    block.append(
+      el('p', `Resets ${date(typeof q.resets === 'string' ? q.resets : null)}`),
+      el('p', `Observed ${date(typeof q.at === 'string' ? q.at : null)}`),
     );
-    item.append(heading);
-    if (typeof quota.used === 'number')
-      item.append(bar('Recorded allowance used', quota.used, 100, 'of window'));
-    item.append(
-      el('p', `Resets ${date(typeof quota.resets === 'string' ? quota.resets : null)}`),
-      el('p', `Observed ${date(typeof quota.at === 'string' ? quota.at : null)}`),
-    );
-    if (quota.reached) item.append(el('p', String(quota.reached), 'notice warning'));
-    snapshots.append(item);
+    if (q.reached) block.append(el('p', String(q.reached), 'notice warning'));
+    quota.append(block);
   }
   if (!report.quotas.length)
-    snapshots.append(
+    quota.append(
       emptyState(
-        'No quota snapshot recorded',
-        'Missing information does not mean your allowance is unused.',
+        'No quota observation yet',
+        'Missing does not mean unused. A snapshot appears when Codex records the provider limits.',
       ),
     );
   const workload = panel(
-    'Your recorded usage',
-    'Local workload for the selected period, account, and model.',
+    'Your local workload',
+    'Measured in the selected period, account, and model.',
   );
   const values = el('div', '', 'workload-list');
-  values.append(
-    datum('User turns', precise(report.statistics.tasks)),
-    datum('Model requests', precise(report.totals.requests)),
-    datum('Input + output tokens', precise(report.totals.processed)),
-    datum('API-equivalent estimate', estimate(report.totals)),
-    datum('Unpriced requests', precise(report.totals.unpricedRequests)),
-  );
+  for (const [label, value] of [
+    ['User turns', precise(report.statistics.tasks)],
+    ['Model requests', precise(report.totals.requests)],
+    ['Input + output tokens', precise(report.totals.processed)],
+    ['API-equivalent', estimate(report.totals)],
+    ['Unpriced requests', precise(report.totals.unpricedRequests)],
+  ])
+    values.append(datum(label, value));
   if (report.statistics.subscriptionMultiple !== null)
     values.append(
       datum('Estimate / configured fee', `${report.statistics.subscriptionMultiple.toFixed(2)}x`),
@@ -764,28 +916,124 @@ function comparisonView(report) {
     values,
     el(
       'p',
-      'Last five hours is a local lookback. A quota snapshot has its own window and reset time. API estimates are not subscription charges.',
+      'Last five hours is a local lookback. A provider window has its own duration and reset. API estimates do not determine your subscription allowance.',
+      'note comparison-note',
+    ),
+    viewLink('Configure billing comparison', 'settings', 'billing'),
+  );
+  grid.append(quota, workload);
+  return grid;
+}
+/** @param {CodexReport} report */
+function healthView(report) {
+  const c = record(report.health.collection);
+  const attention = Boolean(c.pending || c.partial || c.failed || c.missing);
+  const collection = panel(
+    'Collection status',
+    'The most recent scan, independent of pricing coverage.',
+  );
+  const state = el('div', '', `health-state${attention ? ' attention' : ''}`);
+  state.append(
+    el(
+      'strong',
+      !Object.keys(c).length
+        ? 'Waiting for a scan'
+        : attention
+          ? 'Some records need attention'
+          : 'Latest scan complete',
+    ),
+    el(
+      'p',
+      typeof c.at === 'string'
+        ? `Recorded ${date(c.at)}`
+        : 'Keep the collector running or run codex-report sync.',
       'note',
     ),
   );
-  grid.append(snapshots, workload);
-  return grid;
+  const counts = el('div', '', 'health-stats');
+  for (const [key, label] of [
+    ['files', 'Files checked'],
+    ['added', 'New requests'],
+    ['partial', 'Partial files'],
+    ['failed', 'Failed files'],
+    ['missing', 'Missing sources'],
+  ])
+    counts.append(
+      datum(label, typeof c[key] === 'number' ? precise(Number(c[key])) : 'Not recorded'),
+    );
+  collection.append(state, counts);
+  const pricing = panel('Price coverage', 'Unknown prices do not erase the recorded token usage.');
+  const values = el('div', '', 'workload-list');
+  values.append(
+    datum('Priced requests', precise(report.totals.pricedRequests)),
+    datum('Unpriced requests', precise(report.totals.unpricedRequests)),
+    datum('Storage', String(report.health.backend || 'Not recorded')),
+  );
+  pricing.append(values);
+  const missing = report.models.filter((m) => m.totals.unpricedRequests);
+  for (const m of missing) {
+    const row = el('div', '', 'issue-row');
+    row.append(
+      el('span', m.name),
+      el('span', `${precise(m.totals.unpricedRequests)} requests`, 'note'),
+    );
+    pricing.append(row);
+  }
+  if (!missing.length)
+    pricing.append(
+      el(
+        'p',
+        report.totals.requests
+          ? 'All requests in this selection have a recorded rate.'
+          : 'No requests in this selection yet.',
+        'note',
+      ),
+    );
+  const grid = el('div', '', 'grid-two');
+  grid.append(collection, pricing);
+  const issues = panel(
+    'Recorded issues',
+    'Collection diagnostics, not the failures of individual turns.',
+  );
+  const observations = Array.isArray(report.health.issues) ? report.health.issues.map(record) : [];
+  for (const issue of observations) {
+    const row = el('div', '', 'issue-row');
+    const name = el('div');
+    name.append(
+      el('span', String(issue.code || 'Unclassified')),
+      el('span', date(typeof issue.latest === 'string' ? issue.latest : null), 'task-date'),
+    );
+    row.append(name, el('span', `${String(issue.observations ?? '?')} observations`, 'note'));
+    issues.append(row);
+  }
+  if (!observations.length) issues.append(el('p', 'No issues recorded in the ledger.', 'note'));
+  const diagnostics = document.createElement('details');
+  diagnostics.className = 'diagnostics';
+  diagnostics.open = diagnosticsOpen;
+  diagnostics.addEventListener('toggle', () => {
+    if (diagnostics.isConnected) diagnosticsOpen = diagnostics.open;
+  });
+  const toggle = el('summary', 'Technical diagnostics and source details');
+  toggle.dataset.focusKey = 'diagnostics';
+  diagnostics.append(toggle, el('pre', JSON.stringify(report.health, null, 2)));
+  const page = el('div', '', 'health-page');
+  page.append(grid, issues, diagnostics);
+  return page;
 }
 /** @param {CodexReport} report */
 function render(report) {
   current = report;
-  taskIndex = new Map(report.tasks.map((task) => [`${task.thread}:${task.turn}`, task]));
+  taskIndex = new Map(report.tasks.map((t) => [`${t.thread}:${t.turn}`, t]));
   if (view === 'settings') return;
   const content = byId('content');
-  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  const focusKey = active && content.contains(active) ? active.dataset.focusKey : undefined;
-  content.replaceChildren();
-  const period = byId('period-info');
+  const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const focusKey = focused && content.contains(focused) ? focused.dataset.focusKey : undefined;
+  const listScroll = content.querySelector('.session-list')?.scrollTop || 0;
   const scopeLabel =
     report.period.label === 'lifetime'
       ? 'Recorded lifetime'
       : report.period.label.charAt(0).toUpperCase() + report.period.label.slice(1);
-  period.replaceChildren(
+  byId('period-info').replaceChildren(
     el(
       'span',
       `${scopeLabel} / ${report.account === 'all' ? 'All recorded accounts' : report.account}`,
@@ -796,104 +1044,36 @@ function render(report) {
       `${report.period.from ? date(report.period.from, report.period.timezone) : 'Earliest recorded usage'} to ${report.period.to ? date(report.period.to, report.period.timezone) : 'now'} (${report.period.timezone})`,
     ),
   );
-  byId('freshness').textContent = `Last updated ${date(report.generatedAt)}`;
+  byId('freshness').textContent = `Updated ${date(report.generatedAt)}`;
   const failure = byId('failure');
   const latest = report.tasks[0];
   failure.classList.toggle('hidden', !latest || latest.status !== 'failed');
   failure.replaceChildren();
-  if (latest?.status === 'failed')
+  if (latest?.status === 'failed') {
     failure.append(
       el('strong', `Latest turn: ${latest.displayOutcome.label}`),
-      el('p', 'Recorded usage is retained. Open the session for its breakdown and failure reason.'),
+      el('p', 'Usage is retained. Open its session for the recorded reason and token breakdown.'),
     );
-  const totals = report.totals;
+    const session = report.sessions.find((s) => s.id === latest.thread);
+    if (session) {
+      const show = action('Inspect session', 'text-button');
+      show.addEventListener('click', () => openSession(session));
+      failure.append(show);
+    }
+  }
+  content.replaceChildren();
   if (view === 'overview') {
-    const metrics = el('section', '', 'metric-strip');
-    metrics.setAttribute('aria-label', 'Selected period totals');
-    metrics.append(
-      card(
-        'API-equivalent estimate',
-        estimate(totals),
-        totals.unpricedRequests
-          ? `${precise(totals.unpricedRequests)} requests still unpriced`
-          : totals.requests
-            ? 'All recorded requests priced'
-            : 'No usage in this selection',
-        true,
-      ),
-      card(
-        'Input tokens',
-        number(totals.input),
-        totals.cachePercent === null
-          ? 'No input recorded'
-          : `${totals.cachePercent.toFixed(1)}% cached input`,
-      ),
-      card(
-        'Output tokens',
-        number(totals.output),
-        `${number(totals.reasoning)} reasoning, included`,
-      ),
-      card(
-        'User turns',
-        precise(report.statistics.tasks),
-        `${precise(report.sessions.length)} sessions / ${precise(totals.requests)} model requests`,
-      ),
-    );
-    content.append(metrics, activityView(report));
-    const recent = el('section', '', 'panel');
-    const heading = el('div', '', 'list-heading');
-    const title = el('div');
-    title.append(
-      el('h2', 'Recent sessions'),
-      el('p', 'Open a conversation to explore its turns.', 'description'),
-    );
-    heading.append(title, viewLink('View all sessions', 'sessions'));
-    recent.append(heading);
-    for (const session of report.sessions.slice(0, 3)) recent.append(sessionView(session));
-    if (!report.sessions.length)
-      recent.append(
-        emptyState(
-          'No sessions in this selection',
-          'Keep the collector running while using Codex, or import retained history with codex-report sync.',
-        ),
-      );
-    content.append(recent);
-  } else if (view === 'sessions') {
-    const query = sessionQuery.trim().toLocaleLowerCase();
-    const sessions = report.sessions.filter((session) =>
-      [session.id, session.name || '', date(session.started)].some((text) =>
-        text.toLocaleLowerCase().includes(query),
-      ),
-    );
-    const pageSize = settingsState?.values.dashboard.sessionsPerPage || 20;
-    const pages = Math.max(1, Math.ceil(sessions.length / pageSize));
-    sessionPage = Math.min(sessionPage, pages - 1);
-    button('sessions-prev').disabled = sessionPage === 0;
-    button('sessions-next').disabled = sessionPage >= pages - 1;
-    byId('sessions-count').textContent =
-      `${sessions.length} sessions / Page ${sessionPage + 1} of ${pages}`;
-    const list = panel(
-      'Your conversations',
-      `${report.tasks.length} root turns in the selected period. Session totals include linked agent work.`,
-    );
-    list.classList.add('sessions-panel');
-    for (const session of sessions.slice(sessionPage * pageSize, (sessionPage + 1) * pageSize))
-      list.append(sessionView(session));
-    if (!sessions.length)
-      list.append(
-        emptyState(
-          query ? 'No matching sessions' : 'No sessions in this period',
-          query
-            ? 'Try another name, date, or session ID.'
-            : 'Choose Recorded lifetime or import retained history.',
-        ),
-      );
-    content.append(list);
-  } else if (view === 'limits') content.append(comparisonView(report));
+    const grid = el('div', '', 'overview-grid');
+    grid.append(activityView(report), workflowView(report));
+    content.append(summaryView(report), grid, recentSessions(report));
+  } else if (view === 'sessions') content.append(sessionsView(report));
+  else if (view === 'limits') content.append(comparisonView(report));
   else content.append(healthView(report));
+  const newList = content.querySelector('.session-list');
+  if (newList) newList.scrollTop = listScroll;
   if (focusKey) {
-    const replacement = Array.from(content.querySelectorAll('[data-focus-key]')).find(
-      (node) => node instanceof HTMLElement && node.dataset.focusKey === focusKey,
+    const replacement = [...content.querySelectorAll('[data-focus-key]')].find(
+      (n) => n instanceof HTMLElement && n.dataset.focusKey === focusKey,
     );
     if (replacement instanceof HTMLElement) replacement.focus({ preventScroll: true });
   }
@@ -903,8 +1083,11 @@ async function refresh(force = false) {
     if (force) refreshRequested = true;
     return;
   }
-  // Background collection must not interrupt selecting/copying values or naming.
-  if (!force && (renameDialog.open || window.getSelection()?.type === 'Range')) return;
+  if (
+    !force &&
+    (renameDialog.open || commandDialog.open || window.getSelection()?.type === 'Range')
+  )
+    return;
   loading = true;
   if (force) {
     button('refresh').disabled = true;
@@ -923,51 +1106,43 @@ async function refresh(force = false) {
       applyAppearance(settingsState.values.dashboard);
     }
     const account = select('account');
+    const previous = account.value;
     for (const name of status.accounts) {
-      if (!Array.from(account.options).some((option) => option.value === name)) {
-        const option = document.createElement('option');
-        option.value = name;
-        option.textContent = name;
-        account.append(option);
-      }
+      if (typeof name === 'string')
+        setOption('account', name, name === 'all' ? 'All recorded accounts' : name);
     }
+    account.value = previous;
     if (force || status.revision !== revision || Date.now() - lastRefresh >= 10000) {
-      const params = new URLSearchParams({ scope: select('period').value, account: account.value });
+      const scope = select('period').value;
       const model = select('model').value;
+      const params = new URLSearchParams({ scope, account: account.value });
       if (model) params.set('model', model);
       const report = /** @type {CodexReport} */ (await get('/api/report?' + params));
       if (
-        select('period').value !== params.get('scope') ||
-        select('account').value !== params.get('account') ||
-        select('model').value !== (params.get('model') || '')
+        select('period').value !== scope ||
+        account.value !== params.get('account') ||
+        select('model').value !== model
       ) {
         refreshRequested = true;
         return;
       }
-      button('download').disabled = false;
+      const selectedModel = select('model').value;
+      for (const m of report.models) setOption('model', m.name);
+      select('model').value = selectedModel;
       if (view !== 'settings') render(report);
       else current = report;
       revision = report.revision;
       lastRefresh = Date.now();
-      for (const model of report.models) {
-        const models = select('model');
-        if (!Array.from(models.options).some((option) => option.value === model.name)) {
-          const option = document.createElement('option');
-          option.value = model.name;
-          option.textContent = model.name;
-          models.append(option);
-        }
-      }
+      button('download').disabled = false;
     }
     byId('connection').textContent = 'Collector connected';
     byId('connection').classList.remove('offline');
     byId('error').classList.add('hidden');
-  } catch (error) {
+  } catch (e) {
     byId('connection').textContent = 'Collector unavailable';
     byId('connection').classList.add('offline');
     showError(
-      (error instanceof Error ? error.message : String(error)) +
-        ' Last loaded data is retained; use Refresh to retry.',
+      `${e instanceof Error ? e.message : String(e)} Last loaded data is retained. Use Refresh to retry.`,
     );
   } finally {
     loading = false;
@@ -981,14 +1156,7 @@ async function refresh(force = false) {
     }
   }
 }
-/** @param {string} label @param {string} className */
-function buttonElement(label, className) {
-  const node = document.createElement('button');
-  node.type = 'button';
-  node.textContent = label;
-  node.className = className;
-  return node;
-}
+
 /** @param {HTMLElement} parent @param {string} id @param {string} label @param {string} [value] @param {string} [type] */
 function inputField(parent, id, label, value = '', type = 'text') {
   const wrap = document.createElement('label');
@@ -1060,12 +1228,10 @@ function settingsView() {
   const content = byId('content');
   const form = document.createElement('form');
   form.id = 'settings-form';
-  // Validate the first invalid field explicitly so hidden tabs cannot compete
-  // for native focus. Browser constraints still provide the validation rules.
   form.noValidate = true;
   const appearance = panel(
     'Appearance',
-    'Personalize the entire workspace. Preview changes here, then save them for this computer.',
+    'Set a comfortable reading size and color mode. Preview the whole workspace before saving.',
   );
   const fields = el('div', '', 'form-grid');
   selectField(
@@ -1146,19 +1312,19 @@ function settingsView() {
   );
   const typography = el('section', '', 'typography-settings');
   typography.setAttribute('aria-labelledby', 'typography-heading');
-  const typographyHeading = el('h3', 'Text size');
-  typographyHeading.id = 'typography-heading';
+  const title = el('h3', 'Your reading size');
+  title.id = 'typography-heading';
   const help = el(
     'p',
-    'Scales every page, including navigation, charts, tables, settings, and dialogs. Preview is instant; Save settings makes it permanent.',
+    'One setting for the whole workspace: navigation, charts, session details, forms, and dialogs.',
     'note',
   );
   help.id = 'font-size-help';
-  const sizeControls = el('div', '', 'font-size-controls');
+  const sizes = el('div', '', 'font-size-controls');
   const size = inputField(
-    sizeControls,
+    sizes,
     'settings-font-size',
-    'Base size',
+    'Base text size',
     String(state.dashboard.fontSize ?? 17),
     'number',
   );
@@ -1168,23 +1334,23 @@ function settingsView() {
   size.required = true;
   size.setAttribute('aria-describedby', 'font-size-help font-size-units');
   const slider = inputField(
-    sizeControls,
+    sizes,
     'settings-font-slider',
-    'Adjust text size',
+    'Adjust size',
     String(state.dashboard.fontSize ?? 17),
     'range',
   );
   slider.min = '14';
   slider.max = '24';
   slider.step = '1';
-  slider.setAttribute('aria-describedby', 'font-size-help font-size-units');
-  const reset = buttonElement('Reset to 17', 'secondary');
+  slider.setAttribute('aria-describedby', 'font-size-help');
+  const reset = action('Reset to 17');
   reset.id = 'font-size-reset';
   reset.dataset.preferenceAction = 'reset-size';
-  sizeControls.append(reset);
+  sizes.append(reset);
   const units = el(
     'p',
-    '14-24 px reference size. Default: 17. Browser text preferences and zoom still apply.',
+    '14-24 px reference size. Browser text preferences and zoom still apply.',
     'note',
   );
   units.id = 'font-size-units';
@@ -1192,13 +1358,13 @@ function settingsView() {
   preview.setAttribute('aria-label', 'Typography preview');
   preview.append(
     el('span', 'Aa', 'type-specimen'),
-    el('p', 'Your workspace, at your reading size.'),
+    el('p', 'Clear numbers. Comfortable reading.'),
     el('span', '0123456789', 'type-numerals'),
   );
-  typography.append(typographyHeading, help, sizeControls, units, preview);
+  typography.append(title, help, sizes, units, preview);
   appearance.append(fields, typography);
   const previewSize = () => {
-    if (settingsSaving || !size.validity.valid || !size.value) return;
+    if (settingsSaving || !size.value || !size.validity.valid) return;
     slider.value = size.value;
     slider.setAttribute('aria-valuetext', `${size.value} pixels reference size`);
     applyFontSize(Number(size.value));
@@ -1214,9 +1380,10 @@ function settingsView() {
     size.value = '17';
     size.dispatchEvent(new Event('input', { bubbles: true }));
   });
+
   const reporting = panel(
-    'Reporting defaults',
-    'Set your initial filters, timezone, and terminal detail. Recorded usage and prices stay unchanged.',
+    'Reporting',
+    'Changes apply to future receipts and report boundaries. Stored tokens and applied prices are not modified.',
   );
   const rf = el('div', '', 'form-grid');
   const zone = inputField(rf, 'settings-timezone', 'Reporting timezone', state.timezone);
@@ -1236,8 +1403,8 @@ function settingsView() {
   );
   reporting.append(rf);
   const billing = panel(
-    'Billing cycle',
-    'Configure one account label at a time. Choose the same account in your report filters to use its cycle.',
+    'Billing & subscription comparison',
+    'Configure each account label separately. Labels do not change ownership of recorded usage. Select that account in report filters to view its billing cycle.',
   );
   const bf = el('div', '', 'form-grid');
   const billAccount = inputField(
@@ -1376,14 +1543,14 @@ function settingsView() {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (settingsSaving) return;
-    const firstInvalid = Array.from(form.querySelectorAll('input,select')).find(
+    const invalid = [...form.querySelectorAll('input,select')].find(
       (control) =>
         (control instanceof HTMLInputElement || control instanceof HTMLSelectElement) &&
         !control.disabled &&
         !control.checkValidity(),
     );
-    if (firstInvalid instanceof HTMLInputElement || firstInvalid instanceof HTMLSelectElement) {
-      firstInvalid.reportValidity();
+    if (invalid instanceof HTMLInputElement || invalid instanceof HTMLSelectElement) {
+      invalid.reportValidity();
       return;
     }
     /** @param {string} id */
@@ -1427,7 +1594,7 @@ function settingsView() {
       return;
     }
     settingsSaving = true;
-    status.textContent = 'Saving settings...';
+    status.textContent = 'Saving preferences...';
     status.dataset.state = 'saving';
     save.disabled = true;
     reload.disabled = true;
@@ -1443,7 +1610,7 @@ function settingsView() {
         status.dataset.state = saved.auditWarning ? 'error' : 'saved';
         status.textContent =
           saved.auditWarning ||
-          'Saved. Appearance, text size, and reporting settings apply now. Default page and filters apply when you reopen the dashboard.';
+          'Saved. Appearance and text size apply now. Start-page defaults apply when you reopen this workspace.';
       })
       .catch((e) => {
         status.dataset.state = 'error';
@@ -1468,18 +1635,16 @@ function settingsTabs(form, sections) {
   const activate = (name, focus = false) => {
     settingsSection = name;
     for (const [key, , section] of sections) {
-      const selected = key === name;
-      section.hidden = !selected;
+      const active = key === name;
+      section.hidden = !active;
       const tab = button(`settings-tab-${key}`);
-      tab.setAttribute('aria-selected', String(selected));
-      tab.tabIndex = selected ? 0 : -1;
-      if (selected && focus) tab.focus();
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+      if (active && focus) tab.focus();
     }
   };
   for (const [key, title, section] of sections) {
-    const tab = document.createElement('button');
-    tab.type = 'button';
-    tab.textContent = title;
+    const tab = action(title);
     tab.id = `settings-tab-${key}`;
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-controls', `settings-panel-${key}`);
@@ -1487,29 +1652,27 @@ function settingsTabs(form, sections) {
     section.setAttribute('role', 'tabpanel');
     section.setAttribute('aria-labelledby', tab.id);
     tab.addEventListener('click', () => activate(key));
-    tab.addEventListener('keydown', (event) => {
+    tab.addEventListener('keydown', (e) => {
       const keys = sections.map(([id]) => id);
       const index = keys.indexOf(key);
       let next = index;
-      if (event.key === 'ArrowRight') next = (index + 1) % keys.length;
-      else if (event.key === 'ArrowLeft') next = (index + keys.length - 1) % keys.length;
-      else if (event.key === 'Home') next = 0;
-      else if (event.key === 'End') next = keys.length - 1;
+      if (e.key === 'ArrowRight') next = (index + 1) % keys.length;
+      else if (e.key === 'ArrowLeft') next = (index + keys.length - 1) % keys.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = keys.length - 1;
       else return;
-      event.preventDefault();
+      e.preventDefault();
       activate(keys[next], true);
     });
     tabs.append(tab);
   }
   form.prepend(tabs);
   activate(sections.some(([key]) => key === settingsSection) ? settingsSection : 'appearance');
-  // Native validation can find a field on a different tab. Reveal it before
-  // the browser moves focus, instead of leaving an invalid hidden control.
   form.addEventListener(
     'invalid',
-    (event) => {
-      if (!(event.target instanceof HTMLElement)) return;
-      for (const [key, , section] of sections) if (section.contains(event.target)) activate(key);
+    (e) => {
+      if (!(e.target instanceof HTMLElement)) return;
+      for (const [key, , section] of sections) if (section.contains(e.target)) activate(key);
     },
     true,
   );
@@ -1517,6 +1680,7 @@ function settingsTabs(form, sections) {
 /** @param {string} next */
 async function navigate(next) {
   if (settingsSaving) return;
+  if (!(next in pageNames)) next = 'overview';
   if (next === 'settings' && view === next && document.getElementById('settings-form')) return;
   if (
     view === 'settings' &&
@@ -1530,23 +1694,15 @@ async function navigate(next) {
   settingsDirty = false;
   const sequence = ++navigationSequence;
   view = next;
-  const names = {
-    overview: 'Overview',
-    sessions: 'Sessions',
-    limits: 'Usage comparison',
-    health: 'Data health',
-    settings: 'Settings',
-  };
   const subtitles = {
-    overview: 'Understand your usage without losing the detail.',
-    sessions: 'Your conversations, with every turn in context.',
-    limits: 'Compare your recorded workload with observed quotas.',
-    health: 'Know what was collected and what still needs attention.',
-    settings: 'Choose how this workspace works for you.',
+    overview: 'A clear picture of the work behind your conversations.',
+    sessions: 'Choose a conversation. Explore its work, one turn at a time.',
+    limits: 'Local measurements, alongside what the provider reported.',
+    health: 'Understand what is collected, what is priced, and what needs attention.',
+    settings: 'Your workspace. Your way of reading it.',
   };
-  byId('title').textContent = names[/** @type {keyof typeof names} */ (view)] || names.overview;
-  byId('subtitle').textContent =
-    subtitles[/** @type {keyof typeof subtitles} */ (view)] || subtitles.overview;
+  byId('title').textContent = pageNames[/** @type {keyof typeof pageNames} */ (view)];
+  byId('subtitle').textContent = subtitles[/** @type {keyof typeof subtitles} */ (view)];
   document.title = `${byId('title').textContent} - Codex Report`;
   for (const node of document.querySelectorAll('button[data-view]')) {
     const active = node.getAttribute('data-view') === view;
@@ -1558,25 +1714,225 @@ async function navigate(next) {
     byId(id).classList.toggle('hidden', view === 'settings');
   byId('session-controls').classList.toggle('hidden', view !== 'sessions');
   byId('failure').classList.add('hidden');
+  const content = byId('content');
+  content.classList.remove('route-enter');
   if (view === 'settings') {
-    byId('content').replaceChildren(
-      emptyState('Opening settings', 'Reading your saved preferences.'),
+    content.replaceChildren(
+      emptyState('Opening preferences', 'Reading the settings stored on this computer.'),
     );
     try {
       const snapshot = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
-      if (sequence === navigationSequence && view === 'settings') {
-        settingsState = snapshot;
-        applyAppearance(snapshot.values.dashboard);
-        settingsView();
-      }
-    } catch (error) {
-      if (sequence === navigationSequence)
-        showError(error instanceof Error ? error.message : String(error));
+      if (sequence !== navigationSequence || view !== 'settings') return;
+      settingsState = snapshot;
+      applyAppearance(snapshot.values.dashboard);
+      settingsView();
+    } catch (e) {
+      if (sequence === navigationSequence) showError(e instanceof Error ? e.message : String(e));
     }
   } else if (current) render(current);
+  content.classList.add('route-enter');
+}
+/** @param {Session} session */
+async function renameSession(session) {
+  if (renameDialog.open || renameSaving) return;
+  try {
+    const snapshot = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
+    renameRevision = snapshot.revision;
+    renameThread = session.id;
+    input('session-name').value = session.name || '';
+    byId('rename-error').textContent = '';
+    renameDialog.showModal();
+    input('session-name').focus();
+  } catch (e) {
+    showError(e instanceof Error ? e.message : String(e));
+  }
+}
+function downloadReport() {
+  if (!current) return;
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(current, null, 2)], { type: 'application/json' }),
+  );
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'codex-report.json';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function renderCommands() {
+  const query = input('command-search').value.trim().toLocaleLowerCase();
+  commandEntries = Object.entries(pageNames).map(([key, label]) => ({
+    label,
+    detail: 'Page',
+    run: () => {
+      void navigate(key);
+    },
+  }));
+  if (current)
+    commandEntries.push(
+      ...current.sessions.map((session) => ({
+        label: sessionTitle(session),
+        detail: `${session.turnIds.length} turns`,
+        run: () => openSession(session),
+      })),
+    );
+  commandEntries = commandEntries
+    .filter((entry) => `${entry.label} ${entry.detail}`.toLocaleLowerCase().includes(query))
+    .slice(0, 20);
+  commandIndex = 0;
+  const results = byId('command-results');
+  results.replaceChildren();
+  for (const [index, entry] of commandEntries.entries()) {
+    const node = action('', 'command-result');
+    node.append(el('span', entry.label), el('small', entry.detail));
+    node.dataset.commandIndex = String(index);
+    node.id = `command-result-${index}`;
+    node.tabIndex = -1;
+    node.setAttribute('role', 'option');
+    node.setAttribute('aria-selected', String(index === commandIndex));
+    node.addEventListener('click', () => {
+      commandDialog.close();
+      entry.run();
+    });
+    results.append(node);
+  }
+  if (commandEntries.length)
+    input('command-search').setAttribute('aria-activedescendant', 'command-result-0');
+  else {
+    input('command-search').removeAttribute('aria-activedescendant');
+    const empty = el('p', 'No matching pages or sessions. Try another search.', 'empty');
+    empty.setAttribute('role', 'status');
+    results.append(empty);
+  }
+}
+function openCommands() {
+  if (renameDialog.open || settingsSaving || commandDialog.open) return;
+  commandReturnFocus =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  input('command-search').value = '';
+  renderCommands();
+  commandDialog.showModal();
+  input('command-search').setAttribute('aria-expanded', 'true');
+  input('command-search').focus();
 }
 async function boot() {
   button('download').disabled = true;
+  for (const node of document.querySelectorAll('button[data-view]'))
+    node.addEventListener('click', () => {
+      void navigate(node.getAttribute('data-view') || 'overview');
+    });
+  document.querySelector('.brand')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    void navigate('overview');
+  });
+  button('refresh').addEventListener('click', () => {
+    void refresh(true);
+  });
+  button('download').addEventListener('click', downloadReport);
+  button('open-commands').addEventListener('click', openCommands);
+  button('command-close').addEventListener('click', () => commandDialog.close());
+  input('command-search').addEventListener('input', renderCommands);
+  commandDialog.addEventListener('close', () => {
+    input('command-search').setAttribute('aria-expanded', 'false');
+    if (commandReturnFocus?.isConnected) commandReturnFocus.focus({ preventScroll: true });
+    else button('open-commands').focus({ preventScroll: true });
+  });
+  commandDialog.addEventListener('keydown', (e) => {
+    if (e.target !== input('command-search')) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!commandEntries.length) return;
+      commandIndex =
+        (commandIndex + (e.key === 'ArrowDown' ? 1 : -1) + commandEntries.length) %
+        commandEntries.length;
+      for (const node of byId('command-results').querySelectorAll('button')) {
+        const active = node.dataset.commandIndex === String(commandIndex);
+        node.setAttribute('aria-selected', String(active));
+        if (active) {
+          input('command-search').setAttribute('aria-activedescendant', node.id);
+          node.scrollIntoView({ block: 'nearest' });
+        }
+      }
+    } else if (e.key === 'Enter' && commandEntries[commandIndex]) {
+      e.preventDefault();
+      commandDialog.close();
+      commandEntries[commandIndex].run();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (commandDialog.open) commandDialog.close();
+      else openCommands();
+    }
+  });
+  const shortcut = byId('open-commands').querySelector('kbd');
+  if (shortcut && /Mac/i.test(navigator.platform)) shortcut.textContent = 'Cmd K';
+  input('session-search').addEventListener('input', () => {
+    sessionQuery = input('session-search').value;
+    sessionPage = 0;
+    if (current) render(current);
+  });
+  for (const id of ['session-outcome', 'session-sort'])
+    select(id).addEventListener('change', () => {
+      sessionPage = 0;
+      if (current) render(current);
+    });
+  button('sessions-prev').addEventListener('click', () => {
+    sessionPage = Math.max(0, sessionPage - 1);
+    if (current) render(current);
+  });
+  button('sessions-next').addEventListener('click', () => {
+    sessionPage++;
+    if (current) render(current);
+  });
+  button('rename-cancel').addEventListener('click', () => {
+    if (!renameSaving) renameDialog.close();
+  });
+  renameDialog.addEventListener('cancel', (e) => {
+    if (renameSaving) e.preventDefault();
+  });
+  renameDialog.addEventListener('close', () => {
+    const trigger = [...document.querySelectorAll('[data-focus-key]')].find(
+      (n) => n instanceof HTMLElement && n.dataset.focusKey === `rename-${renameThread}`,
+    );
+    if (trigger instanceof HTMLElement) trigger.focus({ preventScroll: true });
+  });
+  byId('rename-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (renameSaving) return;
+    renameSaving = true;
+    button('rename-save').disabled = true;
+    button('rename-cancel').disabled = true;
+    input('session-name').disabled = true;
+    void saveSettings(
+      { sessionNames: { [renameThread]: input('session-name').value.trim() || null } },
+      renameRevision,
+    )
+      .then(async () => {
+        renameDialog.close();
+        await refresh(true);
+      })
+      .catch((error) => {
+        byId('rename-error').textContent = error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        renameSaving = false;
+        button('rename-save').disabled = false;
+        button('rename-cancel').disabled = false;
+        input('session-name').disabled = false;
+      });
+  });
+  window.addEventListener('beforeunload', (e) => {
+    if (settingsDirty) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+  for (const id of ['period', 'account', 'model'])
+    select(id).addEventListener('change', () => {
+      sessionPage = 0;
+      void refresh(true);
+    });
   const token = new URLSearchParams(location.hash.slice(1)).get('token');
   if (token) {
     history.replaceState(null, '', location.pathname);
@@ -1599,84 +1955,7 @@ async function boot() {
     settingsState.values.dashboard.defaultModel,
     settingsState.values.dashboard.defaultModel || 'All models',
   );
-  for (const node of document.querySelectorAll('button[data-view]'))
-    node.addEventListener('click', () => {
-      void navigate(node.getAttribute('data-view') || 'overview');
-    });
   await navigate(settingsState.values.dashboard.defaultView);
-  input('session-search').addEventListener('input', () => {
-    sessionQuery = input('session-search').value;
-    sessionPage = 0;
-    if (current) render(current);
-  });
-  button('sessions-prev').addEventListener('click', () => {
-    sessionPage = Math.max(0, sessionPage - 1);
-    if (current) render(current);
-  });
-  button('sessions-next').addEventListener('click', () => {
-    sessionPage++;
-    if (current) render(current);
-  });
-  button('rename-cancel').addEventListener('click', () => {
-    if (!renameSaving) renameDialog.close();
-  });
-  renameDialog.addEventListener('cancel', (event) => {
-    if (renameSaving) event.preventDefault();
-  });
-  renameDialog.addEventListener('close', () => {
-    const trigger = Array.from(document.querySelectorAll('[data-focus-key]')).find(
-      (node) => node instanceof HTMLElement && node.dataset.focusKey === `rename-${renameThread}`,
-    );
-    if (trigger instanceof HTMLElement) trigger.focus({ preventScroll: true });
-  });
-  byId('rename-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    if (renameSaving) return;
-    renameSaving = true;
-    button('rename-save').disabled = true;
-    input('session-name').disabled = true;
-    void saveSettings(
-      { sessionNames: { [renameThread]: input('session-name').value.trim() || null } },
-      renameRevision,
-    )
-      .then(async () => {
-        renameDialog.close();
-        await refresh(true);
-      })
-      .catch((error) => {
-        byId('rename-error').textContent = error instanceof Error ? error.message : String(error);
-      })
-      .finally(() => {
-        renameSaving = false;
-        button('rename-save').disabled = false;
-        input('session-name').disabled = false;
-      });
-  });
-  window.addEventListener('beforeunload', (event) => {
-    if (settingsDirty) {
-      event.preventDefault();
-      event.returnValue = '';
-    }
-  });
-  for (const id of ['period', 'account', 'model'])
-    select(id).addEventListener('change', () => {
-      sessionPage = 0;
-      void refresh(true);
-    });
-  button('refresh').addEventListener('click', () => {
-    void refresh(true);
-  });
-  button('download').addEventListener('click', () => {
-    if (!current) return;
-    const url = URL.createObjectURL(
-      new Blob([JSON.stringify(current, null, 2)], { type: 'application/json' }),
-    );
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'codex-report.json';
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  });
   await refresh(true);
   setInterval(() => {
     if (!document.hidden) void refresh();
@@ -1685,14 +1964,14 @@ async function boot() {
     if (!document.hidden) void refresh();
   });
 }
-void boot().catch((error) => {
+void boot().catch((e) => {
   byId('connection').textContent = 'Collector unavailable';
   byId('connection').classList.add('offline');
   byId('content').replaceChildren(
     emptyState(
       'Reconnect to your workspace',
-      'Run codex-report start --open and use the newly opened address. Your data has not changed.',
+      'Run codex-report start --open and use the newly opened address. Your recorded data has not changed.',
     ),
   );
-  showError(error instanceof Error ? error.message : String(error));
+  showError(e instanceof Error ? e.message : String(e));
 });
