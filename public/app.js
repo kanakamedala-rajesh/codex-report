@@ -530,7 +530,9 @@ function taskView(task, showSession = false) {
   details.dataset.task = key;
   details.open = expanded.has(key);
   details.addEventListener('toggle', () => {
-    if (details.isConnected) details.open ? expanded.add(key) : expanded.delete(key);
+    if (!details.isConnected) return;
+    if (details.open) expanded.add(key);
+    else expanded.delete(key);
   });
   const summary = el('summary');
   summary.dataset.focusKey = `turn-${key}`;
