@@ -10,93 +10,65 @@
   </head>
   <body>
     <a class="skip" href="#main">Skip to analytics</a>
-    <button
-      id="nav-scrim"
-      class="nav-scrim"
-      type="button"
-      aria-label="Close navigation"
-      tabindex="-1"
-      hidden
-    ></button>
-    <aside id="navigation" class="sidebar">
+    <aside class="sidebar" aria-label="Workspace navigation">
       <div class="brand">
-        <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-          <path
-            d="M11 5H5v22h6M21 5h6v22h-6M13 21v-6m6 6V10"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="square"
-          />
+        <svg viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M10 5H5v22h5M22 5h5v22h-5M12 21v-5m4 5V10m4 11v-8" />
         </svg>
-        <span>Codex<span class="brand-secondary">Report</span></span>
-        <button
-          id="nav-close"
-          class="icon-button mobile-only"
-          type="button"
-          aria-label="Close navigation"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
-        </button>
+        <span>Codex Report</span>
       </div>
       <nav aria-label="Analytics views">
-        <button data-view="overview" class="selected" aria-current="page">
+        <button type="button" data-view="overview" class="selected" aria-current="page">
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" /></svg
-          ><span>Overview</span>
+            <path d="M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 0h7v7h-7z" /></svg
+          >Overview
         </button>
-        <button data-view="sessions">
+        <button type="button" data-view="sessions">
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 4h16v12H9l-5 4V4zM8 8h8M8 12h5" /></svg
-          ><span>Sessions</span>
+            <path d="M4 4h16v13H9l-5 4V4zM8 8h8m-8 4h5" /></svg
+          >Sessions
         </button>
-        <button data-view="limits">
+        <button type="button" data-view="limits">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M4 20V10m8 10V4m8 16v-7M2 20h20" /></svg
-          ><span>Usage comparison</span>
+          >Usage comparison
         </button>
-        <button data-view="health">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg
-          ><span>Data health</span>
-        </button>
-        <button data-view="settings">
+        <button type="button" data-view="health">
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 7h6m4 0h6M4 17h10m4 0h2" />
-            <circle cx="12" cy="7" r="2" />
-            <circle cx="16" cy="17" r="2" /></svg
-          ><span>Settings</span>
+            <path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3zM8 12l3 3 5-6" /></svg
+          >Data health
+        </button>
+        <button type="button" data-view="settings" class="settings-navigation">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 6h5m6 0h5M4 12h10m6 0h0M4 18h2m6 0h8" />
+            <circle cx="12" cy="6" r="3" />
+            <circle cx="17" cy="12" r="3" />
+            <circle cx="9" cy="18" r="3" /></svg
+          >Settings
         </button>
       </nav>
       <div class="sidebar-foot">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3zM8 12l3 3 5-6" />
-        </svg>
-        <div>
-          <strong>Your data stays here.</strong>
-          <p>Local records. No prompts.<br />No telemetry or provider API calls.</p>
-        </div>
+        <div class="live" id="connection" role="status">Connecting</div>
+        <p>Stored on this computer.<br />No prompts or telemetry.</p>
       </div>
     </aside>
     <main id="main" tabindex="-1">
       <header class="page-header">
         <div class="page-heading">
-          <button
-            id="nav-toggle"
-            class="icon-button mobile-only"
-            type="button"
-            aria-label="Open navigation"
-            aria-controls="navigation"
-            aria-expanded="false"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
-          </button>
-          <div>
-            <h1 id="title">Overview</h1>
-            <p id="subtitle" class="subtitle">The work behind every turn, in one place.</p>
-          </div>
+          <h1 id="title" tabindex="-1">Overview</h1>
+          <p id="subtitle">Understand your usage without losing the detail.</p>
         </div>
-        <div class="connection-wrap">
-          <span class="connection-dot" aria-hidden="true"></span>
-          <div class="live" id="connection" role="status">Connecting</div>
+        <div id="report-actions" class="header-actions">
+          <button id="refresh" class="secondary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" /></svg
+            >Refresh
+          </button>
+          <button id="download" class="secondary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12m-4-4 4 4 4-4M4 15v6h16v-6" /></svg
+            >Export JSON
+          </button>
         </div>
       </header>
       <section id="filters" class="filters" aria-label="Report filters">
@@ -119,79 +91,55 @@
             <option value="">All models</option>
           </select></label
         >
-        <div class="filter-actions">
-          <button
-            id="refresh"
-            class="icon-button"
-            type="button"
-            aria-label="Refresh report"
-            title="Refresh report"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1" /></svg
-            ><span class="sr-only">Refresh</span>
-          </button>
-          <button id="download" class="secondary" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5" /></svg
-            >Export JSON
-          </button>
-        </div>
       </section>
       <p id="period-info" class="period-info"></p>
+      <div id="error" class="notice error hidden" role="alert"></div>
+      <div id="failure" class="notice warning hidden" role="status"></div>
       <section
         id="session-controls"
         class="session-controls hidden"
         aria-label="Session search and pages"
       >
-        <label for="session-search" class="sr-only">Find a session</label>
-        <div class="search-field">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="10" cy="10" r="6" />
-            <path d="m15 15 5 5" /></svg
-          ><input
+        <label class="search-field" for="session-search"
+          >Find a session<input
             id="session-search"
             type="search"
-            placeholder="Search by name, ID, or start date"
+            placeholder="Search by name, date, or session ID"
             autocomplete="off"
-          />
-        </div>
-        <span id="sessions-count" class="fine" aria-live="polite"></span>
+        /></label>
         <div class="pagination">
-          <button id="sessions-prev" class="secondary" type="button">Previous</button
-          ><button id="sessions-next" class="secondary" type="button">Next</button>
+          <span id="sessions-count" class="note" aria-live="polite"></span>
+          <button id="sessions-prev" class="secondary" type="button">Previous</button>
+          <button id="sessions-next" class="secondary" type="button">Next</button>
         </div>
       </section>
-      <div id="error" class="notice notice-error hidden" role="alert"></div>
-      <div id="failure" class="notice hidden" role="status"></div>
       <section id="content" aria-label="Report content">
-        <div class="empty initial-state">
-          <span class="loading-indicator" aria-hidden="true"></span>
+        <div class="loading" role="status">
           <h2>Opening your workspace</h2>
-          <p>Connecting to the local collector. Your records stay on this device.</p>
+          <p>Reading the local usage ledger.</p>
+          <div class="skeleton" aria-hidden="true"></div>
         </div>
       </section>
-      <footer>
-        <span id="freshness">No data received yet.</span
-        ><span>API-equivalent estimates. Not billed charges.</span>
+      <footer class="page-footer">
+        <span id="freshness">Waiting for the collector.</span
+        ><span>API estimates are not billed charges.</span>
       </footer>
     </main>
     <dialog id="rename-dialog" aria-labelledby="rename-heading">
       <form id="rename-form">
         <h2 id="rename-heading">Name this session</h2>
-        <p class="note">
-          A name for this workspace only. It will not rename the conversation in Codex or read its
-          prompts.
+        <p class="description">
+          A label for this dashboard only. Your Codex conversation stays unchanged.
         </p>
-        <label for="session-name">Display name</label
-        ><input
+        <label for="session-name">Session name</label>
+        <input
           id="session-name"
           maxlength="120"
           autocomplete="off"
           aria-describedby="rename-help"
         />
-        <p id="rename-help" class="note">Leave blank to use the session start date and time.</p>
-        <p id="rename-error" role="alert"></p>
+        <p id="rename-help" class="note">Leave blank to use its start date and time.</p>
+        <p id="rename-error" class="form-error" role="alert"></p>
         <div class="form-actions">
           <button id="rename-cancel" class="secondary" type="button">Cancel</button
           ><button id="rename-save" class="primary" type="submit">Save name</button>

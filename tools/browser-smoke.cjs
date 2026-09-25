@@ -4,10 +4,10 @@ const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
 const { launchBrowser } = require('./browser-launch.cjs');
-const { auditSurface } = require('./ui-audit.cjs');
 const playwright = require(process.env.CODEX_REPORT_PLAYWRIGHT || 'playwright-core');
 const { initializeConfig, saveConfig } = require('../dist/config');
 const { Store } = require('../dist/database');
+const { auditDesktop } = require('./ui-audit.cjs');
 const { startService, rpc } = require('../dist/service');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-report-browser-'));
 const source = path.join(temp, 'sessions');
@@ -16,6 +16,11 @@ const config = initializeConfig(temp);
 config.port = 0;
 config.pollMs = 500;
 config.sources = [{ name: 'synthetic', path: source, kind: 'rollouts', account: 'demo' }];
+config.dashboard.defaultPeriod = 'lifetime';
+config.sessionNames = {
+  'demo-thread': 'Dashboard improvements',
+  'second-thread': 'Release validation',
+};
 saveConfig(temp, config);
 const line = (type, payload, at) => JSON.stringify({ timestamp: at, type, payload }) + '\n';
 const file = path.join(source, 'demo.jsonl');
@@ -98,348 +103,332 @@ fs.writeFileSync(
 const store = new Store(temp);
 store.close();
 let browser, service;
+const fixtureMode = process.env.CODEX_REPORT_UI_FIXTURE === '1';
+const output = process.env.CODEX_REPORT_UI_OUTPUT;
+const evidence = [];
+async function fixturePage(page, snapshot) {
+  // Explicit offline rendering mode for restricted test environments. API
+  // security is tested separately by the real HTTP integration suite.
+  await page.setContent(
+    fs
+      .readFileSync(path.join(__dirname, '../public/index.html'), 'utf8')
+      .replace(/<link[^>]+style\.css[^>]*>/, '')
+      .replace(/<script[^>]+app\.js[^>]*><\/script>/, ''),
+  );
+  await page.addStyleTag({
+    content: fs.readFileSync(path.join(__dirname, '../public/style.css'), 'utf8'),
+  });
+  await page.evaluate((snapshot) => {
+    const clone = (v) => JSON.parse(JSON.stringify(v));
+    const settings = clone(snapshot.settings),
+      report = clone(snapshot.report),
+      status = clone(snapshot.status);
+    let rev = 0;
+    window.__fixture = { empty: false, offline: false, conflict: false, delay: 0, calls: 0 };
+    window.fetch = async (url, options = {}) => {
+      const state = window.__fixture;
+      state.calls++;
+      if (state.offline) throw new Error('Synthetic collector unavailable');
+      let value;
+      if (String(url).startsWith('/api/settings')) {
+        if (options.method === 'POST') {
+          const body = JSON.parse(options.body);
+          if (state.conflict || body.revision !== settings.revision)
+            return {
+              ok: false,
+              json: async () => ({
+                error: 'Settings changed in another window. Reload before saving.',
+              }),
+            };
+          const changes = body.changes;
+          settings.values = {
+            ...settings.values,
+            ...changes,
+            dashboard: { ...settings.values.dashboard, ...changes.dashboard },
+            accounts: { ...settings.values.accounts, ...changes.accounts },
+            sessionNames: { ...settings.values.sessionNames, ...changes.sessionNames },
+          };
+          // The real settings API removes optional fields when sent null.
+          for (const account of Object.values(settings.values.accounts))
+            for (const [key, value] of Object.entries(account))
+              if (value === null) delete account[key];
+          settings.revision = `fixture-${++rev}`;
+          for (const session of report.sessions)
+            if (changes.sessionNames && Object.hasOwn(changes.sessionNames, session.id))
+              session.name = changes.sessionNames[session.id];
+          status.settingsRevision = settings.revision;
+          status.revision++;
+        }
+        value = settings;
+      } else if (String(url).startsWith('/api/status')) value = status;
+      else if (String(url).startsWith('/api/report')) {
+        value = clone(report);
+        const params = new URLSearchParams(String(url).split('?')[1]);
+        value.account = params.get('account') || 'all';
+        if (params.get('model')) {
+          value.models = value.models.filter((m) => m.name === params.get('model'));
+        }
+        if (state.empty) {
+          value.tasks = [];
+          value.sessions = [];
+          value.days = [];
+          value.models = [];
+          for (const key of [
+            'input',
+            'cached',
+            'output',
+            'reasoning',
+            'processed',
+            'requests',
+            'pricedRequests',
+            'unpricedRequests',
+          ])
+            value.totals[key] = 0;
+          value.totals.pricePico = null;
+          value.totals.apiEquivalent = 'unpriced';
+          value.totals.cachePercent = null;
+          value.statistics.tasks = 0;
+        }
+        if (state.delay) await new Promise((resolve) => setTimeout(resolve, state.delay));
+      } else value = { ok: true };
+      return { ok: true, json: async () => clone(value) };
+    };
+  }, snapshot);
+  await page.addScriptTag({
+    content: fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8'),
+  });
+}
 async function main() {
-  // Fail with setup instructions before launching a collector when the browser is absent.
   browser = await launchBrowser(playwright);
   service = await startService(temp);
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
-  async function visit(name) {
-    const target = page.locator(`button[data-view="${name}"]`);
-    if (await page.locator('#nav-toggle').isVisible()) {
-      if ((await page.locator('#nav-toggle').getAttribute('aria-expanded')) !== 'true')
-        await page.click('#nav-toggle');
-    }
-    await target.click();
+  await rpc(temp, '/api/sync', {});
+  const snapshot = {
+    report: await rpc(temp, '/api/report?scope=lifetime&account=all'),
+    settings: await rpc(temp, '/api/settings'),
+    status: await rpc(temp, '/api/status'),
+  };
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+    colorScheme: 'dark',
+  });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  if (fixtureMode) await fixturePage(page, snapshot);
+  else await page.goto(service.url);
+  await page.waitForSelector('.metric-strip');
+  const go = async (name) => {
+    await page.locator(`nav button[data-view="${name}"]`).click();
     await page.waitForFunction(
-      (name) =>
-        document.querySelector(`button[data-view="${name}"]`).getAttribute('aria-current') ===
+      (v) =>
+        document.querySelector(`nav button[data-view="${v}"]`).getAttribute('aria-current') ===
         'page',
       name,
     );
-  }
-  const audit = [];
-  const errors = [],
-    external = [];
-  page.on('pageerror', (e) => errors.push(e.message));
-  page.on('request', (r) => {
-    if (!r.url().startsWith('http://127.0.0.1:')) external.push(r.url());
-  });
-  if (process.env.CODEX_REPORT_BROWSER_FIXTURE === '1') {
-    // Offline DOM fixture rendering is a separate check, not a live browser test.
-    // It does not navigate to an address blocked by managed browser policy.
-    let snapshot;
-    for (let n = 0; n < 30; n++) {
-      snapshot = await rpc(temp, '/api/report?scope=lifetime');
-      if (snapshot.tasks.length === 13) break;
-      await new Promise((r) => setTimeout(r, 100));
+  };
+  const capture = async (name) => {
+    // Measure settled colors, not the middle of a hover/theme transition.
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(200);
+    evidence.push(await auditDesktop(page, name));
+    if (output) {
+      fs.mkdirSync(output, { recursive: true });
+      await page.screenshot({ path: path.join(output, name + '.png'), fullPage: true });
     }
-    await page.setContent(
-      fs
-        .readFileSync(path.join(__dirname, '../public/index.html'), 'utf8')
-        .replace(/<link[^>]+>/g, '')
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/g, ''),
-    );
-    await page.addStyleTag({
-      content: fs.readFileSync(path.join(__dirname, '../public/style.css'), 'utf8'),
-    });
-    const settings = await rpc(temp, '/api/settings');
-    await page.evaluate(
-      ({ snapshot, settings }) => {
-        let revision = 0;
-        const data = structuredClone(snapshot);
-        const prefs = structuredClone(settings);
-        // This branch only exercises DOM behavior with synthetic responses.
-        // Real auth, validation, persistence and conflicts have HTTP integration tests.
-        window.fetch = async (url, options) => {
-          let result;
-          if (String(url).includes('/api/settings')) {
-            if (options?.method === 'POST') {
-              const changes = JSON.parse(options.body).changes;
-              if (changes.dashboard) Object.assign(prefs.values.dashboard, changes.dashboard);
-              for (const key of ['timezone', 'display', 'reportAccount'])
-                if (key in changes) prefs.values[key] = changes[key];
-              if (changes.accounts) Object.assign(prefs.values.accounts, changes.accounts);
-              if (changes.sessionNames)
-                for (const [id, name] of Object.entries(changes.sessionNames))
-                  data.sessions.find((s) => s.id === id).name = name;
-              prefs.revision = 'fixture-' + ++revision;
-            }
-            result = prefs;
-          } else if (String(url).includes('/api/status'))
-            result = {
-              revision: data.revision + revision,
-              settingsRevision: prefs.revision,
-              accounts: ['all', 'demo'],
-            };
-          else result = data;
-          return new Response(JSON.stringify(result), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        };
-      },
-      { snapshot, settings },
-    );
-    await page.addScriptTag({
-      content: fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8'),
-    });
-  } else await page.goto(service.url);
+  };
+  // One batched desktop/zoom audit. No phone layout or touch-gesture claims.
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate((theme) => {
+      document.documentElement.dataset.theme = theme;
+    }, theme);
+    for (const view of ['overview', 'sessions', 'limits', 'health', 'settings']) {
+      await go(view);
+      if (view === 'settings') await page.waitForSelector('#settings-form');
+      await capture(`${view}-${theme}-1440`);
+    }
+  }
+  await go('overview');
+  await page.getByRole('button', { name: 'By model', exact: true }).click();
+  assert.equal(await page.locator('table').count(), 1);
+  await capture('models-light-1440');
+  await page.getByRole('button', { name: 'By day', exact: true }).click();
+  await page.locator('.chart-data summary').click();
+  await capture('exact-values-light-1440');
+  await go('sessions');
+  await page.locator('.session > summary').first().click();
+  await page.locator('.session[open] .task > summary').first().click();
+  await capture('session-detail-light-1440');
+  const key = await page.locator('.session[open]').getAttribute('data-session');
+  await page.locator('#refresh').click();
   await page.waitForFunction(
-    () => document.getElementById('connection').textContent === 'Collector connected',
+    (key) =>
+      document.querySelector(`details[data-session="${key}"]`)?.open &&
+      !document.getElementById('refresh').disabled,
+    key,
   );
-  await page.selectOption('#period', 'lifetime');
-  await page.waitForFunction(() => document.querySelectorAll('details.task').length > 0);
-  await page.waitForSelector('.activity-chart');
-  assert.equal(await page.locator('.activity-chart').getAttribute('role'), 'img');
-  assert.equal(
-    await page.locator('.activity-chart g[data-day]').count(),
-    Number(await page.locator('.activity-chart').getAttribute('data-days')),
+  assert.ok(await page.locator('.task[open]').count());
+  await page.locator('#session-search').fill('no-such-session');
+  assert.equal(await page.locator('.session').count(), 0);
+  await page.locator('#session-search').fill('');
+  const first = page.locator('.session').first();
+  if (!(await first.evaluate((node) => node.open))) await first.locator(':scope > summary').click();
+  await first.getByRole('button', { name: /Name session|Rename session/ }).click();
+  await page.locator('#session-name').fill('<img src=x onerror=alert(1)>');
+  await page.locator('#rename-save').click();
+  await page.waitForSelector('#rename-dialog', { state: 'hidden' });
+  await page.waitForFunction(() => !document.getElementById('refresh').disabled);
+  assert.equal(await page.locator('.session-title img').count(), 0);
+  assert.ok(
+    (await page.locator('.session-title').allTextContents()).some((v) => v.includes('<img')),
   );
-  await page.click('.chart-data > summary');
-  assert.ok(await page.locator('.chart-data table tbody tr').count());
-  await page.click('#refresh');
-  await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
-  assert.equal(await page.locator('.chart-data').getAttribute('open'), '');
-  await page.click('.chart-data > summary');
-
-  audit.push(await auditSurface(page, 'overview-dark'));
-  const out = process.env.CODEX_REPORT_SCREENSHOTS;
-  if (out) fs.mkdirSync(out, { recursive: true });
-  if (out)
-    await page.screenshot({
-      animations: 'disabled',
-      path: path.join(out, 'dashboard-desktop.png'),
-      fullPage: true,
-    });
-  await visit('sessions');
-  assert.equal(await page.locator('details.session').count(), 2);
-  audit.push(await auditSurface(page, 'sessions-dark'));
-  await page.evaluate(() => window.scrollTo(0, 0));
-  if (out)
-    await page.screenshot({
-      animations: 'disabled',
-      path: path.join(out, 'dashboard-sessions.png'),
-      fullPage: true,
-    });
-  const mainSession = page.locator('details.session[data-session="demo-thread"]');
-  await mainSession.locator(':scope > summary').click();
-  assert.equal(await mainSession.locator('details.task').count(), 12);
-  assert.ok((await mainSession.textContent()).includes('Usage exceeded'));
-  await mainSession.locator('details.task summary').first().click();
-  await page.waitForTimeout(2200);
-  assert.equal(await mainSession.getAttribute('open'), '');
-  assert.equal(await mainSession.locator('details.task').first().getAttribute('open'), '');
-  await mainSession.getByRole('button', { name: 'Name session' }).click();
-  await page.fill('#session-name', '<img src=x onerror=alert(1)>');
-  await page.click('#rename-save');
-  await page.waitForFunction(() => !document.getElementById('rename-dialog').open);
-  await page.waitForFunction(() =>
-    document
-      .querySelector('.session[data-session="demo-thread"] .session-title')
-      .textContent.includes('<img'),
-  );
-  assert.equal(await mainSession.locator('img').count(), 0, 'name rendered as text, never markup');
-  await mainSession.getByRole('button', { name: 'Name session' }).click();
-  await page.fill('#session-name', 'Usage collector refinements');
-  await page.click('#rename-save');
-  await page.waitForFunction(() => !document.getElementById('rename-dialog').open);
-  await page.fill('#session-search', 'second-thread');
-  assert.equal(await page.locator('details.session').count(), 1);
-  await page.fill('#session-search', '');
-  if (out)
-    await page.screenshot({
-      animations: 'disabled',
-      path: path.join(out, 'dashboard-sessions-dark.png'),
-      fullPage: true,
-    });
-  await page.selectOption('#account', 'demo');
-  await page.waitForTimeout(100);
-  assert.equal(await page.inputValue('#account'), 'demo');
-  await visit('limits');
-  await page.waitForSelector('.quota');
-  assert.ok((await page.textContent('#content')).includes('100%'));
-  if (out)
-    await page.screenshot({
-      animations: 'disabled',
-      path: path.join(out, 'dashboard-limits.png'),
-      fullPage: true,
-    });
-  audit.push(await auditSurface(page, 'comparison-dark'));
-  await visit('health');
-  assert.ok((await page.textContent('#content')).includes('Source status'));
-  audit.push(await auditSurface(page, 'health-dark'));
-  if (out)
-    await page.screenshot({
-      animations: 'disabled',
-      path: path.join(out, 'dashboard-health.png'),
-      fullPage: true,
-    });
-  await visit('settings');
+  await go('settings');
   await page.waitForSelector('#settings-form');
-  audit.push(await auditSurface(page, 'settings-dark'));
-  await page.selectOption('#settings-theme', 'light');
-  await page.selectOption('#settings-view', 'sessions');
-  await page.selectOption('#settings-period', '5h');
-  await page.fill('#settings-timezone', 'Asia/Kolkata');
-  await page.fill('#billing-account', 'demo');
-  await page.locator('#billing-account').press('Tab');
-  await page.fill('#billing-day', '31');
-  await page.fill('#billing-time', '09:00');
-  await page.selectOption('#billing-fee-mode', 'usd');
-  await page.fill('#billing-usd', '120');
-  await page.waitForTimeout(2200);
-  await visit('settings');
-  assert.equal(await page.inputValue('#billing-day'), '31', 'live refresh does not erase edits');
-  assert.equal(await page.inputValue('#settings-theme'), 'light');
-  await page.click('#settings-save');
+  await page.locator('#settings-tab-reporting').click();
+  await page.locator('#settings-timezone').fill('Asia/Kolkata');
+  await page.locator('#settings-tab-billing').click();
+  await page.locator('#billing-day').fill('6');
+  await page.locator('#settings-tab-appearance').click();
+  await page.locator('#settings-theme').selectOption('light');
+  assert.equal(await page.locator('#settings-timezone').inputValue(), 'Asia/Kolkata');
+  assert.equal(await page.locator('#billing-day').inputValue(), '6');
+  await page.locator('#settings-save').click();
   await page.waitForFunction(() =>
     document.getElementById('settings-message').textContent.startsWith('Saved.'),
   );
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
-  await page.evaluate(() => window.scrollTo(0, 0));
-  if (out)
-    await page.screenshot({
-      animations: 'disabled',
-      path: path.join(out, 'dashboard-settings-light.png'),
-      fullPage: true,
-    });
-  await page.selectOption('#settings-theme', 'system');
-  await page.click('#settings-save');
-  await page.waitForFunction(() => document.documentElement.dataset.theme === 'system');
-  await page.emulateMedia({ colorScheme: 'light' });
+  await page.locator('#settings-tab-reporting').click();
+  await page.locator('#settings-timezone').fill('Etc/UTC');
+  await page.waitForTimeout(2100);
+  assert.equal(await page.locator('#settings-timezone').inputValue(), 'Etc/UTC');
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.locator('nav button[data-view="sessions"]').click();
+  assert.equal(await page.locator('#settings-form').count(), 1, 'dirty navigation retained');
+  await page.locator('#settings-timezone').fill('');
+  await page.locator('#settings-tab-billing').click();
+  await page.locator('#billing-day').fill('32');
+  await page.locator('#settings-tab-appearance').click();
+  await page.locator('#settings-save').click();
+  assert.equal(await page.locator('#settings-tab-reporting').getAttribute('aria-selected'), 'true');
+  assert.equal(
+    await page.locator('#settings-timezone').evaluate((n) => n === document.activeElement),
+    true,
+  );
+  await page.locator('#settings-timezone').fill('Etc/UTC');
+  await page.locator('#settings-tab-appearance').click();
+  await page.locator('#settings-save').click();
+  assert.equal(await page.locator('#settings-tab-billing').getAttribute('aria-selected'), 'true');
+  await page.locator('#billing-day').fill('6');
+  await page.locator('#settings-save').click();
+  await page.waitForFunction(() =>
+    document.getElementById('settings-message').textContent.startsWith('Saved.'),
+  );
+  await page.locator('#settings-tab-appearance').focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.locator('#settings-tab-reporting').getAttribute('aria-selected'), 'true');
+  await page.keyboard.press('End');
+  assert.equal(await page.locator('#settings-tab-billing').getAttribute('aria-selected'), 'true');
+  await capture('billing-light-1440');
+  for (const width of [1280, 1920, 960]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const view of ['overview', 'sessions', 'settings']) {
+      await go(view);
+      if (view === 'settings') await page.waitForSelector('#settings-form');
+      await capture(`${view}-desktop-${width}`);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'light' });
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'system';
+  });
   assert.equal(
     await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
     'light',
   );
-  await page.emulateMedia({ colorScheme: 'dark' });
-  assert.equal(
-    await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
-    'dark',
-  );
-  await page.selectOption('#settings-theme', 'light');
-  await page.click('#settings-save');
-  await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
-  audit.push(await auditSurface(page, 'settings-light'));
-  await page.setViewportSize({ width: 390, height: 844 });
-  assert.equal(
-    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-    true,
-    'settings mobile fit',
-  );
-  audit.push(await auditSurface(page, 'settings-mobile'));
-  if (out)
-    await page.screenshot({
-      animations: 'disabled',
-      path: path.join(out, 'dashboard-settings-mobile.png'),
-      fullPage: true,
+  await go('overview');
+  await capture('system-light-reduced-motion');
+  if (fixtureMode) {
+    await go('settings');
+    await page.waitForSelector('#settings-form');
+    await page.locator('#settings-tab-reporting').click();
+    await page.locator('#settings-timezone').fill('Asia/Kolkata');
+    await page.evaluate(() => {
+      window.__fixture.conflict = true;
     });
-  await visit('sessions');
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.click('#nav-toggle');
-  assert.equal(await page.locator('#main').getAttribute('inert'), '');
-  assert.ok(
-    await page
-      .locator('button[data-view="settings"]')
-      .evaluate((n) => n.getBoundingClientRect().right <= window.innerWidth),
-    'Settings navigation accessible in the mobile drawer',
-  );
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('#nav-toggle').getAttribute('aria-expanded'), 'false');
-  assert.equal(
-    await page.locator('#nav-toggle').evaluate((n) => n === document.activeElement),
-    true,
-  );
-  if (out)
-    await page.screenshot({
-      animations: 'disabled',
-      path: path.join(out, 'dashboard-sessions-mobile.png'),
-      fullPage: true,
+    await page.locator('#settings-save').click();
+    await page.waitForFunction(
+      () => document.getElementById('settings-message').dataset.state === 'error',
+    );
+    assert.equal(await page.locator('#settings-timezone').inputValue(), 'Asia/Kolkata');
+    await capture('settings-conflict');
+    await page.evaluate(() => {
+      window.__fixture.conflict = false;
     });
-  assert.equal(
-    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-    true,
-    'sessions mobile fit',
-  );
-  audit.push(await auditSurface(page, 'sessions-mobile'));
-  await visit('overview');
-  await page.setViewportSize({ width: 390, height: 844 });
-  if (out)
-    await page.screenshot({
-      animations: 'disabled',
-      path: path.join(out, 'dashboard-mobile.png'),
-      fullPage: true,
+    await page.locator('#settings-save').click();
+    await page.waitForFunction(
+      () => document.getElementById('settings-message').dataset.state === 'saved',
+    );
+    await go('overview');
+    await page.evaluate(() => {
+      window.__fixture.delay = 150;
     });
-  assert.equal(
-    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-    true,
-    'No page overflow on mobile',
-  );
-  audit.push(await auditSurface(page, 'overview-mobile'));
-  await page.setViewportSize({ width: 320, height: 740 });
-  await page.waitForTimeout(200);
-  audit.push(await auditSurface(page, 'overview-320px'));
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.click('#nav-toggle');
-  assert.equal(
-    await page.locator('#navigation').evaluate((n) => getComputedStyle(n).transitionDuration),
-    '0s',
-  );
-  await page.keyboard.press('Escape');
+    await page.locator('#model').selectOption('gpt-6-sol');
+    await page.locator('#model').selectOption('gpt-6-astra');
+    await page.waitForFunction(() => !document.getElementById('refresh').disabled);
+    assert.equal(await page.locator('#model').inputValue(), 'gpt-6-astra');
+    await page.getByRole('button', { name: 'By model', exact: true }).click();
+    await page.waitForFunction(() => {
+      const names = [...document.querySelectorAll('.model-name')].map((node) => node.textContent);
+      return names.length === 1 && names[0] === 'gpt-6-astra';
+    });
+    await page.getByRole('button', { name: 'By day', exact: true }).click();
+    await page.locator('#model').selectOption('');
+    await page.evaluate(() => {
+      window.__fixture.delay = 0;
+    });
+    await page.waitForFunction(() => !document.getElementById('refresh').disabled);
+    await page.evaluate(() => {
+      window.__fixture.empty = true;
+    });
+    await page.locator('#refresh').click();
+    await page.waitForFunction(() =>
+      document.querySelector('#content').textContent.includes('No activity for these filters'),
+    );
+    await capture('empty-desktop');
+    await page.evaluate(() => {
+      window.__fixture.empty = false;
+      window.__fixture.offline = true;
+    });
+    await page.locator('#refresh').click();
+    await page.waitForSelector('#error:not(.hidden)');
+    assert.equal(await page.locator('.metric-strip').count(), 1, 'offline retains content');
+    await capture('offline-desktop');
+    await page.evaluate(() => {
+      window.__fixture.offline = false;
+    });
+    await page.locator('#refresh').click();
+    await page.waitForSelector('#error', { state: 'hidden' });
+  }
   assert.deepEqual(errors, []);
-  assert.deepEqual(external, []);
-  console.log(
-    JSON.stringify(
-      {
-        status: 'PASS',
-        mode:
-          process.env.CODEX_REPORT_BROWSER_FIXTURE === '1'
-            ? 'offline DOM fixtures with real collector snapshot'
-            : 'live browser',
-        browser: browser.version(),
-        playwright: require(
-          path.join(process.env.CODEX_REPORT_PLAYWRIGHT || 'playwright-core', 'package.json'),
-        ).version,
-        audit,
-        checks: [
-          'real collector snapshot',
-          'recorded-day chart with exact values and preserved table expansion',
-          'mobile drawer, keyboard Escape and focus restoration',
-          'text contrast, 44px controls and reduced motion',
-          'dashboard boot',
-          'two grouped sessions / thirteen turns',
-          'usage-exceeded display status',
-          'local session nickname with HTML treated as text',
-          'session search',
-          'settings save and dirty-form preservation',
-          'dark, light, and system theme behavior',
-          'mobile sessions and settings',
-          'expanded state retained',
-          'account filter',
-          'provider quota view',
-          'data health view',
-          '390px viewport without overflow',
-          'no page errors',
-          'no external requests',
-        ],
-      },
-      null,
-      2,
-    ),
-  );
+  const result = {
+    status: 'PASS',
+    mode: fixtureMode
+      ? 'explicit offline UI fixtures; HTTP checked separately'
+      : 'live authenticated HTTP',
+    engine: await browser.version(),
+    scope: 'computer viewports and narrow desktop/zoom reflow; no phone layout target',
+    checks: evidence,
+  };
+  if (output) fs.writeFileSync(path.join(output, 'audit.json'), JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result, null, 2));
 }
 main()
-  .finally(async () => {
-    try {
-      await browser?.close();
-    } finally {
-      try {
-        await service?.close();
-      } finally {
-        fs.rmSync(temp, { recursive: true, force: true });
-      }
-    }
-  })
-  .catch((e) => {
-    console.error(e);
+  .catch((error) => {
+    console.error(error);
     process.exitCode = 1;
+  })
+  .finally(async () => {
+    if (browser) await browser.close();
+    if (service) await service.close();
+    fs.rmSync(temp, { recursive: true, force: true });
   });

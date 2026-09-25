@@ -64,9 +64,12 @@ let view = 'overview',
   revision = -1,
   loading = false;
 const expanded = new Set();
+let activityMode = 'days';
 let activityTableOpen = false;
 let diagnosticsOpen = false;
 let refreshRequested = false;
+let settingsSection = 'appearance';
+let navigationSequence = 0;
 /** @type {Map<string, boolean>} */
 const expandedSessions = new Map();
 /** @type {Map<string, number>} */
@@ -133,92 +136,6 @@ async function renameSession(session) {
     showError(e instanceof Error ? e.message : String(e));
   }
 }
-/** @param {Session} session */
-function sessionView(session) {
-  const tasks = session.turnIds
-    .map((id) => taskIndex.get(`${session.id}:${id}`))
-    .filter((t) => t !== undefined);
-  const details = document.createElement('details');
-  details.className = 'session';
-  details.dataset.session = session.id;
-  details.open = expandedSessions.get(session.id) ?? false;
-  details.addEventListener('toggle', () => {
-    if (details.isConnected) expandedSessions.set(session.id, details.open);
-  });
-  const summary = el('summary');
-  summary.dataset.focusKey = `session-${session.id}`;
-  const identity = el('div', '', 'session-identity');
-  identity.append(
-    el('span', session.name || `Session ${date(session.started)}`, 'session-title'),
-    el('span', `Started ${date(session.started)} | ID ${session.id.slice(0, 8)}`, 'task-date'),
-  );
-  const counts = el('div', '', 'session-counts');
-  counts.append(
-    el('span', `${tasks.length} turn${tasks.length === 1 ? '' : 's'} in selection`, 'note'),
-  );
-  for (const [n, label, code] of [
-    [session.outcomes.completed, 'completed', 'completed'],
-    [session.outcomes.interrupted, 'interrupted', 'interrupted'],
-    [session.outcomes.usageExceeded, 'usage exceeded', 'usage-exceeded'],
-    [session.outcomes.failed, 'failed', 'failed'],
-    [session.outcomes.other, 'active / unknown', 'unknown'],
-  ])
-    if (n) counts.append(el('span', `${n} ${label}`, `badge ${code}`));
-  const cost = el('div', '', 'session-cost');
-  cost.append(
-    el(
-      'span',
-      `${session.totals.pricePico !== null ? '~' : ''}${session.totals.apiEquivalent}`,
-      'num',
-    ),
-    el(
-      'span',
-      session.totals.unpricedRequests
-        ? `${session.totals.unpricedRequests} unpriced requests`
-        : 'API-equivalent',
-      'task-date',
-    ),
-  );
-  const mark = el('span', '', 'session-icon');
-  mark.append(icon('session'));
-  summary.append(mark, identity, counts, cost);
-  const body = el('div', '', 'session-body');
-  const meta = el('div', '', 'session-meta');
-  const rename = el('button', 'Name session', 'secondary');
-  rename.setAttribute('type', 'button');
-  rename.dataset.focusKey = `rename-${session.id}`;
-  rename.addEventListener('click', () => {
-    void renameSession(session);
-  });
-  meta.append(el('code', session.id), rename);
-  body.append(
-    meta,
-    el(
-      'p',
-      `Last activity ${date(session.lastActivity)}. Usage totals follow the selected period, account, and model.`,
-      'note',
-    ),
-  );
-  const limit = shownTurns.get(session.id) ?? 50;
-  for (const task of tasks.slice(-limit)) body.append(taskView(task));
-  if (tasks.length > limit) {
-    const more = el(
-      'button',
-      `Show ${Math.min(50, tasks.length - limit)} earlier turns`,
-      'secondary',
-    );
-    more.dataset.focusKey = `more-${session.id}`;
-    more.addEventListener('click', () => {
-      shownTurns.set(session.id, limit + 50);
-      expandedSessions.set(session.id, true);
-      if (current) render(current);
-    });
-    body.append(more);
-  }
-  details.append(summary, body);
-  return details;
-}
-
 /** @param {string} url @param {RequestInit} [options] */
 async function get(url, options) {
   const response = await fetch(url, { cache: 'no-store', ...options });
@@ -228,74 +145,56 @@ async function get(url, options) {
 }
 /** @param {string} label @param {string} value @param {string} sub @param {boolean} [money] */
 function card(label, value, sub, money = false) {
-  const n = el('div', '', 'card');
-  n.append(
+  const node = el('div', '', 'card');
+  node.append(
     el('div', label, 'label'),
     el('div', value, money ? 'value money' : 'value'),
     el('div', sub, 'sub'),
   );
-  return n;
+  return node;
 }
 /** @param {string} title @param {string} description */
 function panel(title, description) {
-  const n = el('section', '', 'panel');
-  n.append(el('h2', title), el('p', description, 'description'));
-  return n;
+  const node = el('section', '', 'panel');
+  node.append(el('h2', title), el('p', description, 'description'));
+  return node;
 }
 /** @param {string} label @param {string} value */
 function datum(label, value) {
-  const d = el('div', '', 'datum');
-  d.append(el('div', value, 'value'), el('div', label, 'label'));
-  return d;
-}
-/** @param {import('../src/reports').Totals} t */
-function estimate(t) {
-  return `${t.pricePico !== null ? '~' : ''}${t.apiEquivalent}`;
-}
-/** @param {string} name @param {Record<string, string|number>} [attributes] */
-function svgElement(name, attributes = {}) {
-  const node = document.createElementNS('http://www.w3.org/2000/svg', name);
-  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+  const node = el('div', '', 'datum');
+  node.append(el('div', label, 'label'), el('div', value, 'value'));
   return node;
 }
-/** @param {string} kind */
-function icon(kind) {
-  const svg = svgElement('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' });
-  const shapes = {
-    session: 'M4 4h16v12H9l-5 4V4zM8 8h8M8 12h5',
-    health: 'm12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3zM8 12l3 3 5-6',
-    chart: 'M4 20V10m8 10V4m8 16v-7M2 20h20',
-  };
-  svg.append(
-    svgElement('path', { d: shapes[/** @type {keyof typeof shapes} */ (kind)] || shapes.chart }),
-  );
-  return svg;
+/** @param {import('../src/reports').Totals} totals */
+function estimate(totals) {
+  if (!totals.requests) return 'No usage recorded';
+  return totals.pricePico === null ? 'Unpriced' : `~${totals.apiEquivalent}`;
 }
 /** @param {string} title @param {string} description */
 function emptyState(title, description) {
-  const state = el('div', '', 'empty');
-  state.append(icon('chart'), el('h2', title), el('p', description));
-  return state;
+  const node = el('div', '', 'empty');
+  node.append(el('h2', title), el('p', description));
+  return node;
 }
-/** @param {string} title @param {string} target */
-function viewLink(title, target) {
-  const action = el('button', title, 'secondary section-action');
-  action.setAttribute('type', 'button');
-  action.addEventListener('click', () => {
-    void navigate(target).then(() => byId('title').focus({ preventScroll: true }));
+/** @param {string} label @param {string} target */
+function viewLink(label, target) {
+  const node = el('button', label, 'secondary section-action');
+  node.setAttribute('type', 'button');
+  node.addEventListener('click', () => {
+    void navigate(target);
   });
-  return action;
+  return node;
 }
 /** @param {string} label @param {number} value @param {number} maximum @param {string} text */
 function bar(label, value, maximum, text) {
   const row = el('div', '', 'bar-row');
   const top = el('div', '', 'bar-top');
   top.append(el('span', label), el('span', text));
-  const p = document.createElement('progress');
-  p.max = maximum || 1;
-  p.value = value;
-  p.setAttribute('aria-label', label);
-  row.append(top, p);
+  const progress = document.createElement('progress');
+  progress.max = maximum || 1;
+  progress.value = value;
+  progress.setAttribute('aria-label', label);
+  row.append(top, progress);
   return row;
 }
 /** @param {string} caption @param {string[]} headings @param {(string|HTMLElement)[][]} rows */
@@ -306,9 +205,7 @@ function dataTable(caption, headings, rows) {
   wrap.setAttribute('aria-label', caption);
   wrap.dataset.focusKey = `table-${caption}`;
   const table = document.createElement('table');
-  const cap = document.createElement('caption');
-  cap.className = 'sr-only';
-  cap.textContent = caption;
+  const cap = el('caption', caption, 'sr-only');
   const head = document.createElement('thead');
   const header = document.createElement('tr');
   for (const label of headings) {
@@ -319,9 +216,9 @@ function dataTable(caption, headings, rows) {
   }
   head.append(header);
   const body = document.createElement('tbody');
-  for (const row of rows) {
+  for (const values of rows) {
     const tr = document.createElement('tr');
-    for (const item of row) {
+    for (const item of values) {
       const td = document.createElement('td');
       if (typeof item === 'string') td.textContent = item;
       else td.append(item);
@@ -333,200 +230,125 @@ function dataTable(caption, headings, rows) {
   wrap.append(table);
   return wrap;
 }
-/** @param {CodexReport} r */
-function activityView(r) {
-  const timeline = panel(
-    'Recorded activity',
-    'Cached input, other input, and output across the selected period.',
-  );
-  const days = r.days.slice(-14);
-  if (!days.length) {
-    timeline.append(
-      emptyState(
-        'No activity in this period',
-        'Choose another reporting period, or run codex-report sync to import retained history.',
-      ),
-    );
-    return timeline;
-  }
-  const wrap = el('div', '', 'chart-wrap');
-  const legend = el('div', '', 'chart-legend');
-  for (const [label, className] of [
-    ['Cached input', 'cached'],
-    ['Other input', 'fresh'],
-    ['Output', 'output'],
-  ]) {
-    const item = el('span', label);
-    const swatch = el('i', '', `swatch ${className}`);
-    swatch.setAttribute('aria-hidden', 'true');
-    item.prepend(swatch);
-    legend.append(item);
-  }
-  const narrow = window.innerWidth <= 700;
-  const contentWidth = byId('content').clientWidth;
-  const sideBySide = window.innerWidth > 980;
-  const gap = window.innerWidth > 1180 ? 24 : 18;
-  const ratio = window.innerWidth > 1180 ? 1.65 : 1.3;
-  const minimumRight = window.innerWidth > 1180 ? 280 : 260;
-  const panelWidth = sideBySide
-    ? Math.min(((contentWidth - gap) * ratio) / (1 + ratio), contentWidth - gap - minimumRight)
-    : contentWidth;
-  const width = Math.max(220, panelWidth - (narrow ? 32 : 48));
-  const height = narrow ? 234 : 264,
-    left = 55,
-    bottom = height - 40,
-    top = 16;
-  const plotWidth = width - left - 10;
-  const maximum = Math.max(1, ...days.map((d) => d.totals.processed));
-  const chart = svgElement('svg', {
-    class: 'activity-chart',
-    viewBox: `0 0 ${width} ${height}`,
-    role: 'img',
-    'aria-labelledby': 'activity-title activity-description',
-    'data-days': days.length,
-  });
-  const title = svgElement('title', { id: 'activity-title' });
-  title.textContent = 'Token usage by recorded day';
-  const description = svgElement('desc', { id: 'activity-description' });
-  description.textContent = `${days.length} recorded days. Exact token quantities are available in the data table below. Days without a record are not interpolated.`;
-  chart.append(title, description);
-  for (let tick = 0; tick <= 4; tick++) {
-    const y = bottom - (tick / 4) * (bottom - top);
-    chart.append(svgElement('line', { x1: left, y1: y, x2: width - 10, y2: y, class: 'gridline' }));
-    const label = svgElement('text', { x: left - 12, y: y + 4, 'text-anchor': 'end' });
-    label.textContent = number((maximum * tick) / 4);
-    chart.append(label);
-  }
-  days.forEach((day, i) => {
-    const group = svgElement('g', { 'data-day': day.day });
-    const barWidth = Math.min(42, (plotWidth / days.length) * 0.56);
-    const x = left + (plotWidth * (i + 0.5)) / days.length - barWidth / 2;
-    let y = bottom;
-    for (const [className, count] of /** @type {[string,number][]} */ ([
-      ['cached', day.totals.cached],
-      ['fresh', day.totals.input - day.totals.cached],
-      ['output', day.totals.output],
-    ])) {
-      const h = (count / maximum) * (bottom - top);
-      y -= h;
-      const rect = svgElement('rect', { x, y, width: barWidth, height: h, class: className });
-      const tip = svgElement('title');
-      tip.textContent = `${day.day}: ${className === 'fresh' ? 'Other input' : className === 'cached' ? 'Cached input' : 'Output'} ${precise(count)}`;
-      rect.append(tip);
-      group.append(rect);
-    }
-    // Label selected categories, while preserving every exact date in the table.
-    if (
-      i === 0 ||
-      i === days.length - 1 ||
-      i % Math.max(1, Math.ceil(days.length / (width < 420 ? 3 : 5))) === 0
-    ) {
-      const label = svgElement('text', {
-        x: x + barWidth / 2,
-        y: bottom + 27,
-        'text-anchor': 'middle',
-      });
-      label.textContent = new Date(`${day.day}T12:00:00Z`).toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        timeZone: 'UTC',
-      });
-      group.append(label);
-    }
-    chart.append(group);
-  });
-  const details = document.createElement('details');
-  details.className = 'chart-data';
-  details.open = activityTableOpen;
-  details.addEventListener('toggle', () => {
-    if (details.isConnected) activityTableOpen = details.open;
-  });
-  const toggle = el('summary', 'View exact values');
-  toggle.dataset.focusKey = 'chart-data';
-  details.append(toggle);
-  details.append(
-    dataTable(
-      'Exact token usage for the displayed days',
-      ['Day', 'Cached input', 'Other input', 'Output', 'Total'],
-      days.map((d) => [
-        d.day,
-        precise(d.totals.cached),
-        precise(d.totals.input - d.totals.cached),
-        precise(d.totals.output),
-        precise(d.totals.processed),
-      ]),
-    ),
-  );
-  wrap.append(
-    legend,
-    chart,
-    el(
-      'p',
-      `${days.length < r.days.length ? `Latest ${days.length} of ${r.days.length}` : days.length} recorded day${days.length === 1 ? '' : 's'}. Equal spacing represents recorded days, not continuous time.`,
-      'chart-note',
-    ),
-    details,
-  );
-  timeline.append(wrap);
-  return timeline;
+/** @param {string} name @param {Record<string,string|number>} [attributes] */
+function svgElement(name, attributes = {}) {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', name);
+  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+  return node;
 }
-/** @param {CodexReport} r */
-function modelView(r) {
-  const p = panel(
-    'Models in use',
-    'Recorded requests, with estimated cost kept separate from unpriced work.',
-  );
-  if (!r.models.length) {
-    p.append(
-      emptyState('No model records', 'Model details appear after recorded requests are collected.'),
-    );
-    return p;
-  }
-  p.append(
-    dataTable(
-      'Model usage in the selected period',
-      ['Model / requests', 'Tokens', 'API equiv.'],
-      r.models.map((m) => {
-        const name = el('div');
-        name.append(
-          el('span', m.name, 'model-name'),
-          el(
-            'span',
-            `${precise(m.totals.requests)} requests${m.totals.unpricedRequests ? ` / ${precise(m.totals.unpricedRequests)} unpriced` : ''}`,
-            'model-meta',
-          ),
-        );
-        const quantity = el('div', number(m.totals.processed));
-        const progress = document.createElement('progress');
-        progress.className = 'model-track';
-        progress.max = r.totals.processed || 1;
-        progress.value = m.totals.processed;
-        progress.setAttribute(
-          'aria-label',
-          `${m.name}: ${precise(m.totals.processed)} of ${precise(r.totals.processed)} processed tokens`,
-        );
-        quantity.append(progress);
-        const price = el('div', estimate(m.totals));
-        if (m.totals.pricePico !== null && m.totals.unpricedRequests)
-          price.append(el('span', 'Partial estimate', 'model-meta'));
-        return [name, quantity, price];
-      }),
-    ),
-  );
-  p.append(
+/** @param {number} ms */
+function duration(ms) {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  return seconds >= 3600
+    ? `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+/** @param {Session} session */
+function sessionTitle(session) {
+  return session.name || `Session ${date(session.started)}`;
+}
+/** @param {Session} session */
+function sessionView(session) {
+  const tasks = session.turnIds
+    .map((id) => taskIndex.get(`${session.id}:${id}`))
+    .filter((task) => task !== undefined);
+  const details = document.createElement('details');
+  details.className = 'session';
+  details.dataset.session = session.id;
+  details.open = expandedSessions.get(session.id) ?? false;
+  details.addEventListener('toggle', () => {
+    if (details.isConnected) expandedSessions.set(session.id, details.open);
+  });
+  const summary = el('summary');
+  summary.dataset.focusKey = `session-${session.id}`;
+  const identity = el('div', '', 'session-identity');
+  identity.append(
+    el('span', sessionTitle(session), 'session-title'),
     el(
-      'p',
-      'Reasoning is included in output. Token counts are not unique words or subscription credits.',
-      'chart-note',
+      'span',
+      session.name ? `Started ${date(session.started)}` : `Session ID ${session.id.slice(0, 8)}`,
+      'task-date',
     ),
   );
-  return p;
+  const counts = el('div', '', 'session-counts');
+  counts.append(el('strong', `${tasks.length} turn${tasks.length === 1 ? '' : 's'}`));
+  const outcome = session.outcomes;
+  const state = outcome.usageExceeded
+    ? `${outcome.usageExceeded} usage exceeded`
+    : outcome.failed
+      ? `${outcome.failed} failed`
+      : outcome.interrupted
+        ? `${outcome.interrupted} interrupted`
+        : outcome.other
+          ? 'Active / unknown'
+          : 'Completed';
+  counts.append(el('span', state, 'note'));
+  const cost = el('div', '', 'session-cost');
+  cost.append(
+    el(
+      'span',
+      estimate(session.totals),
+      session.totals.pricePico === null ? 'num no-estimate' : 'num',
+    ),
+    el(
+      'span',
+      session.totals.unpricedRequests
+        ? `${session.totals.unpricedRequests} requests unpriced`
+        : 'API estimate',
+      'note',
+    ),
+  );
+  summary.append(identity, counts, cost);
+  const body = el('div', '', 'session-body');
+  const meta = el('div', '', 'session-meta');
+  const rename = el('button', session.name ? 'Rename session' : 'Name session', 'secondary');
+  rename.setAttribute('type', 'button');
+  rename.dataset.focusKey = `rename-${session.id}`;
+  rename.addEventListener('click', () => {
+    void renameSession(session);
+  });
+  meta.append(el('span', `Last activity ${date(session.lastActivity)}`, 'note'), rename);
+  body.append(meta, el('p', 'These turns and their totals follow your current filters.', 'note'));
+  const outcomes = el('div', '', 'outcome-list');
+  for (const [count, label] of [
+    [outcome.completed, 'completed'],
+    [outcome.interrupted, 'interrupted'],
+    [outcome.usageExceeded, 'usage exceeded'],
+    [outcome.failed, 'failed'],
+    [outcome.other, 'active / unknown'],
+  ]) {
+    if (count) outcomes.append(el('span', `${count} ${label}`));
+  }
+  const limit = shownTurns.get(session.id) ?? 50;
+  for (const task of tasks.slice(-limit)) body.append(taskView(task));
+  if (tasks.length > limit) {
+    const more = el(
+      'button',
+      `Show ${Math.min(50, tasks.length - limit)} earlier turns`,
+      'secondary',
+    );
+    more.setAttribute('type', 'button');
+    more.dataset.focusKey = `more-${session.id}`;
+    more.addEventListener('click', () => {
+      shownTurns.set(session.id, limit + 50);
+      expandedSessions.set(session.id, true);
+      if (current) render(current);
+    });
+    body.append(more);
+  }
+  body.append(outcomes);
+  const technical = document.createElement('details');
+  technical.className = 'technical';
+  technical.append(el('summary', 'Full session ID'), el('code', session.id));
+  body.append(technical);
+  details.append(summary, body);
+  return details;
 }
 /** @param {Task} task @param {boolean} [showSession] */
 function taskView(task, showSession = false) {
   const details = document.createElement('details');
   details.className = 'task';
-  const key = task.thread + ':' + task.turn;
+  const key = `${task.thread}:${task.turn}`;
   details.dataset.task = key;
   details.open = expanded.has(key);
   details.addEventListener('toggle', () => {
@@ -536,23 +358,28 @@ function taskView(task, showSession = false) {
   });
   const summary = el('summary');
   summary.dataset.focusKey = `turn-${key}`;
-  const title = el('div');
-  title.append(
+  const identity = el('div');
+  identity.append(
     el('span', `Turn ${task.number ?? task.turn.slice(0, 8)}`, 'task-title'),
-    el('span', date(task.started), 'task-date'),
-  );
-  if (showSession) {
-    const session = current?.sessions.find((s) => s.id === task.thread);
-    title.append(el('span', session?.name || `Session ${task.thread.slice(0, 8)}`, 'task-date'));
-  }
-  summary.append(
-    title,
-    el('span', task.displayOutcome.label, `badge ${task.displayOutcome.code}`),
     el(
       'span',
-      `${estimate(task.totals)}${task.totals.pricePico !== null && task.totals.unpricedRequests ? ' (partial)' : ''}`,
-      'num',
+      `${date(task.started)}${task.durationMs === null ? '' : ` / ${duration(task.durationMs)}`}`,
+      'task-date',
     ),
+  );
+  if (showSession)
+    identity.append(
+      el(
+        'span',
+        current?.sessions.find((s) => s.id === task.thread)?.name ||
+          `Session ${task.thread.slice(0, 8)}`,
+        'task-date',
+      ),
+    );
+  summary.append(
+    identity,
+    el('span', task.displayOutcome.label, `badge ${task.displayOutcome.code}`),
+    el('span', estimate(task.totals), 'num'),
   );
   const body = el('div', '', 'details');
   const grid = el('div', '', 'detail-grid');
@@ -560,9 +387,9 @@ function taskView(task, showSession = false) {
     ['Input tokens', precise(task.totals.input)],
     ['Cached input', precise(task.totals.cached)],
     ['Output tokens', precise(task.totals.output)],
-    ['Reasoning (included in output)', precise(task.totals.reasoning)],
+    ['Reasoning within output', precise(task.totals.reasoning)],
     ['Model requests', precise(task.totals.requests)],
-    ['Child threads', `${task.workers} workers / ${task.reviewers} reviews`],
+    ['Linked agents', `${task.workers} workers / ${task.reviewers} reviews`],
   ])
     grid.append(datum(label, value));
   body.append(
@@ -570,354 +397,490 @@ function taskView(task, showSession = false) {
     el(
       'p',
       task.models.length
-        ? `Models: ${task.models.join(' + ')}`
-        : 'No model recorded for this turn.',
+        ? `Models: ${task.models.join(', ')}`
+        : 'Model information was not recorded.',
       'note',
     ),
   );
   if (task.durationMs !== null)
-    body.append(
-      el('p', `Elapsed ${duration(task.durationMs)}. Includes tools and approval waits.`, 'note'),
-    );
-  body.append(el('code', `${task.thread} / ${task.turn}`));
+    body.append(el('p', 'Elapsed time includes tool activity and approval waits.', 'note'));
   if (task.collectionPending)
-    body.append(el('p', 'Collection is catching up for this turn.', 'notice'));
-  if (task.error) body.append(el('p', `Reason: ${task.error}`, 'notice'));
+    body.append(el('p', 'Collection is catching up for this turn.', 'notice warning'));
+  if (task.error) body.append(el('p', `Recorded reason: ${task.error}`, 'notice warning'));
   if (task.totals.unpricedRequests)
     body.append(
       el(
         'p',
         'Not priced: ' +
           Object.entries(task.unpriced)
-            .map(([model, count]) => `${count} ${model} request(s)`)
-            .join('; '),
+            .map(([model, count]) => `${count} ${model} request${count === 1 ? '' : 's'}`)
+            .join('; ') +
+          '. The estimate includes priced requests only.',
         'notice',
       ),
     );
+  const technical = document.createElement('details');
+  technical.className = 'technical';
+  technical.append(
+    el('summary', 'Request identifiers'),
+    el('code', `${task.thread} / ${task.turn}`),
+  );
+  body.append(technical);
   details.append(summary, body);
   return details;
 }
-/** @param {number} ms */
-function duration(ms) {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  return seconds >= 3600
-    ? `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
-    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+/** @param {CodexReport} report */
+function modelTable(report) {
+  return dataTable(
+    'Model usage in the selected period',
+    ['Model', 'Requests', 'Processed tokens', 'API estimate'],
+    report.models.map((model) => {
+      const name = el('div');
+      name.append(el('span', model.name, 'model-name'));
+      if (model.totals.unpricedRequests)
+        name.append(
+          el('span', `${precise(model.totals.unpricedRequests)} requests unpriced`, 'model-meta'),
+        );
+      return [
+        name,
+        precise(model.totals.requests),
+        precise(model.totals.processed),
+        estimate(model.totals),
+      ];
+    }),
+  );
 }
-/** @param {unknown} value @returns {Record<string, unknown>} */
+/** @param {CodexReport} report */
+function activityView(report) {
+  const section = el('section', '', 'panel');
+  const heading = el('div', '', 'list-heading');
+  const identity = el('div');
+  identity.append(
+    el('h2', 'Usage breakdown'),
+    el('p', 'See where your recorded tokens went.', 'description'),
+  );
+  const tabs = el('div', '', 'section-tabs');
+  tabs.setAttribute('role', 'group');
+  tabs.setAttribute('aria-label', 'Usage breakdown');
+  for (const [code, label] of [
+    ['days', 'By day'],
+    ['models', 'By model'],
+  ]) {
+    const tab = el('button', label);
+    tab.setAttribute('type', 'button');
+    tab.setAttribute('aria-pressed', String(activityMode === code));
+    tab.dataset.focusKey = `activity-${code}`;
+    tab.addEventListener('click', () => {
+      activityMode = code;
+      if (current) render(current);
+    });
+    tabs.append(tab);
+  }
+  heading.append(identity, tabs);
+  section.append(heading);
+  if (activityMode === 'models') {
+    if (report.models.length) section.append(modelTable(report));
+    else
+      section.append(
+        emptyState('No model records yet', 'Model details appear after usage is collected.'),
+      );
+    return section;
+  }
+  const days = report.days.slice(-7);
+  if (!days.length) {
+    section.append(
+      emptyState(
+        'No activity for these filters',
+        'Try Recorded lifetime, or run codex-report sync to import retained sessions.',
+      ),
+    );
+    return section;
+  }
+  const legend = el('div', '', 'chart-legend');
+  for (const [label, kind] of [
+    ['Cached input', 'cached'],
+    ['Other input', 'fresh'],
+    ['Output', 'output'],
+  ]) {
+    const item = el('span', label);
+    const swatch = el('i', '', `swatch ${kind}`);
+    swatch.setAttribute('aria-hidden', 'true');
+    item.prepend(swatch);
+    legend.append(item);
+  }
+  section.append(legend);
+  const maximum = Math.max(1, ...days.map((day) => day.totals.processed));
+  for (const day of days) {
+    const row = el('div', '', 'activity-row');
+    const dateLabel = new Date(`${day.day}T12:00:00Z`).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    });
+    const graph = svgElement('svg', {
+      viewBox: '0 0 1000 20',
+      preserveAspectRatio: 'none',
+      role: 'img',
+      'aria-label': `${day.day}: ${precise(day.totals.cached)} cached input, ${precise(day.totals.input - day.totals.cached)} other input, ${precise(day.totals.output)} output tokens`,
+      class: 'activity-track',
+    });
+    let left = 0;
+    for (const [amount, kind] of [
+      [day.totals.cached, 'cached'],
+      [day.totals.input - day.totals.cached, 'fresh'],
+      [day.totals.output, 'output'],
+    ]) {
+      const width = (Number(amount) / maximum) * 1000;
+      graph.append(svgElement('rect', { x: left, y: 0, width, height: 20, class: String(kind) }));
+      left += width;
+    }
+    row.append(
+      el('span', dateLabel),
+      graph,
+      el('span', `${number(day.totals.processed)} tokens`, 'activity-total'),
+    );
+    section.append(row);
+  }
+  section.append(
+    el(
+      'p',
+      `${days.length < report.days.length ? `Latest ${days.length} of ${report.days.length}` : days.length} recorded days. Gaps in history are not treated as zero usage.`,
+      'chart-note',
+    ),
+  );
+  const details = document.createElement('details');
+  details.className = 'chart-data';
+  details.open = activityTableOpen;
+  details.addEventListener('toggle', () => {
+    if (details.isConnected) activityTableOpen = details.open;
+  });
+  const toggle = el('summary', 'View exact values for all recorded days');
+  toggle.dataset.focusKey = 'chart-data';
+  details.append(
+    toggle,
+    dataTable(
+      'Exact daily token usage',
+      ['Day', 'Cached input', 'Other input', 'Output', 'Total'],
+      report.days.map((day) => [
+        day.day,
+        precise(day.totals.cached),
+        precise(day.totals.input - day.totals.cached),
+        precise(day.totals.output),
+        precise(day.totals.processed),
+      ]),
+    ),
+  );
+  section.append(details);
+  return section;
+}
+/** @param {unknown} value @returns {Record<string,unknown>} */
 function record(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? /** @type {Record<string, unknown>} */ (value)
+    ? /** @type {Record<string,unknown>} */ (value)
     : {};
 }
-/** @param {CodexReport} r */
-function healthView(r) {
-  const c = record(r.health.collection);
-  const count = (/** @type {string} */ key) =>
-    typeof c[key] === 'number' ? precise(/** @type {number} */ (c[key])) : 'Not recorded';
-  const attention = Boolean(c.pending || c.partial || c.failed || c.missing);
-  const collection = panel(
-    'Collection',
-    'The latest local scan. This is independent of price coverage.',
+/** @param {CodexReport} report */
+function healthView(report) {
+  const collection = record(report.health.collection);
+  const attention = Boolean(
+    collection.pending || collection.partial || collection.failed || collection.missing,
   );
+  const section = panel('Collection status', 'The latest scan of your local session records.');
   const state = el('div', '', `health-state${attention ? ' attention' : ''}`);
   const copy = el('div');
   copy.append(
     el(
       'strong',
-      !Object.keys(c).length
-        ? 'Awaiting a scan'
+      !Object.keys(collection).length
+        ? 'Waiting for the first scan'
         : attention
-          ? 'Needs attention'
-          : 'Latest scan complete',
+          ? 'Some records need attention'
+          : 'Latest scan completed',
     ),
     el(
       'p',
-      typeof c.at === 'string'
-        ? `Recorded ${date(c.at)}`
-        : 'Collection activity has not been recorded yet.',
+      typeof collection.at === 'string'
+        ? `Last scan ${date(collection.at)}`
+        : 'Start the collector or run codex-report sync.',
       'note',
     ),
   );
-  state.append(icon('health'), copy);
-  const numbers = el('div', '', 'health-stats');
+  state.append(copy);
+  section.append(state);
+  const stats = el('div', '', 'health-stats');
   for (const [key, label] of [
-    ['files', 'Files considered'],
+    ['files', 'Files checked'],
     ['added', 'New requests'],
     ['partial', 'Partial files'],
     ['failed', 'Failed files'],
-    ['missing', 'Missing roots'],
+    ['missing', 'Missing sources'],
   ])
-    numbers.append(datum(label, count(key)));
-  collection.append(state, numbers);
-  const sources = Array.isArray(r.health.sources) ? r.health.sources.map(record) : [];
-  const sourceSection = el('section', '', 'health-detail');
-  sourceSection.append(el('h3', 'Source status'));
-  if (sources.length)
-    sourceSection.append(
-      dataTable(
-        'Source collection status',
-        ['State', 'Files'],
-        sources.map((s) => [
-          String(s.health || 'Unknown'),
-          typeof s.files === 'number' ? precise(s.files) : 'Not recorded',
-        ]),
+    stats.append(
+      datum(
+        label,
+        typeof collection[key] === 'number'
+          ? precise(/** @type {number} */ (collection[key]))
+          : 'Not recorded',
       ),
     );
-  else
-    sourceSection.append(
+  section.append(stats);
+  const pricing = panel(
+    'Pricing coverage',
+    'Missing rates affect dollar estimates, not your recorded token counts.',
+  );
+  const list = el('div', '', 'workload-list');
+  list.append(
+    datum('Priced requests', precise(report.totals.pricedRequests)),
+    datum('Unpriced requests', precise(report.totals.unpricedRequests)),
+  );
+  pricing.append(list);
+  const missing = report.models.filter((model) => model.totals.unpricedRequests);
+  for (const model of missing) {
+    const row = el('div', '', 'issue-row');
+    row.append(
+      el('span', model.name),
+      el('span', `${precise(model.totals.unpricedRequests)} requests`, 'note'),
+    );
+    pricing.append(row);
+  }
+  if (!missing.length)
+    pricing.append(
       el(
         'p',
-        'No source status recorded. Run codex-report sync to reconcile retained history.',
+        report.totals.requests
+          ? 'All requests in this selection have a recorded price.'
+          : 'No requests in this selection yet.',
         'note',
       ),
     );
-  collection.append(sourceSection);
-  const integrity = panel(
-    'Coverage & integrity',
-    'Unknown prices are not collection failures. The underlying records stay unchanged.',
-  );
-  const coverage = el('div', '', 'workload-list');
-  coverage.append(
-    datum('Priced requests', `${precise(r.totals.pricedRequests)} / ${precise(r.totals.requests)}`),
-    datum('Unpriced requests', precise(r.totals.unpricedRequests)),
-    datum('Storage backend', String(r.health.backend ?? 'Not recorded')),
-  );
-  integrity.append(coverage);
-  const unpriced = r.models.filter((m) => m.totals.unpricedRequests);
-  if (unpriced.length) {
-    const list = el('section', '', 'health-detail');
-    list.append(el('h3', 'Models without complete pricing'));
-    for (const m of unpriced) {
-      const row = el('div', '', 'issue-row');
-      row.append(
-        el('code', m.name),
-        el('span', `${precise(m.totals.unpricedRequests)} requests`, 'badge'),
-      );
-      list.append(row);
-    }
-    integrity.append(list);
-  }
-  const issues = Array.isArray(r.health.issues) ? r.health.issues.map(record) : [];
-  const observations = el('section', '', 'health-detail');
-  observations.append(el('h3', 'Recorded issues'));
-  if (issues.length)
-    for (const issue of issues) {
-      const row = el('div', '', 'issue-row');
-      const text = el('div');
-      text.append(
-        el('code', String(issue.code || 'Unclassified')),
-        el(
-          'span',
-          typeof issue.latest === 'string' ? date(issue.latest) : 'Time not recorded',
-          'task-date',
-        ),
-      );
-      row.append(text, el('span', `${String(issue.observations ?? '?')} observations`, 'badge'));
-      observations.append(row);
-    }
-  else observations.append(el('p', 'No issues recorded in the ledger.', 'note'));
-  integrity.append(observations);
   const grid = el('div', '', 'grid-two');
-  grid.append(collection, integrity);
-  const diagnostics = document.createElement('details');
-  diagnostics.className = 'diagnostics';
-  diagnostics.open = diagnosticsOpen;
-  diagnostics.addEventListener('toggle', () => {
-    if (diagnostics.isConnected) diagnosticsOpen = diagnostics.open;
-  });
-  diagnostics.append(
-    el('summary', 'Inspect technical diagnostics'),
-    el('pre', JSON.stringify(r.health, null, 2)),
+  grid.append(section, pricing);
+  const issues = panel(
+    'Recorded issues',
+    'Ledger diagnostics are separate from quota failures in individual sessions.',
   );
-  const group = el('div');
-  group.append(grid, diagnostics);
+  const observations = Array.isArray(report.health.issues) ? report.health.issues.map(record) : [];
+  for (const observation of observations) {
+    const row = el('div', '', 'issue-row');
+    const name = el('div');
+    name.append(
+      el('span', String(observation.code || 'Unclassified')),
+      el(
+        'span',
+        typeof observation.latest === 'string' ? date(observation.latest) : 'Time not recorded',
+        'task-date',
+      ),
+    );
+    row.append(name, el('span', `${String(observation.observations ?? '?')} observations`, 'note'));
+    issues.append(row);
+  }
+  if (!observations.length) issues.append(el('p', 'No issues recorded in the ledger.', 'note'));
+  const technical = document.createElement('details');
+  technical.className = 'diagnostics';
+  technical.open = diagnosticsOpen;
+  technical.addEventListener('toggle', () => {
+    if (technical.isConnected) diagnosticsOpen = technical.open;
+  });
+  const toggle = el('summary', 'Technical diagnostics and source details');
+  toggle.dataset.focusKey = 'diagnostics';
+  technical.append(toggle, el('pre', JSON.stringify(report.health, null, 2)));
+  const group = el('div', '', 'health-page');
+  group.append(grid, issues, technical);
   return group;
 }
-/** @param {CodexReport} r */
-function render(r) {
-  current = r;
-  taskIndex = new Map(r.tasks.map((t) => [`${t.thread}:${t.turn}`, t]));
-  const content = byId('content');
+/** @param {CodexReport} report */
+function comparisonView(report) {
+  const grid = el('div', '', 'comparison-grid');
+  const snapshots = panel(
+    'Provider quota snapshots',
+    'Last observed in Codex records. These are not live account checks.',
+  );
+  for (const quota of report.quotas) {
+    const item = el('div', '', 'quota');
+    const minutes = Number(quota.minutes);
+    const windowName =
+      Number.isFinite(minutes) && minutes > 0
+        ? minutes >= 1440 && minutes % 1440 === 0
+          ? `${minutes / 1440}-day window`
+          : `${minutes / 60}-hour window`
+        : String(quota.window || 'Unknown window');
+    const title = el('div');
+    title.append(
+      el('h3', windowName),
+      el('p', `Limit: ${String(quota.limitId || 'Unknown')}`, 'note'),
+    );
+    const heading = el('div', '', 'quota-head');
+    heading.append(
+      title,
+      el('span', typeof quota.used === 'number' ? `${quota.used}%` : 'Unknown', 'percent'),
+    );
+    item.append(heading);
+    if (typeof quota.used === 'number')
+      item.append(bar('Recorded allowance used', quota.used, 100, 'of window'));
+    item.append(
+      el('p', `Resets ${date(typeof quota.resets === 'string' ? quota.resets : null)}`),
+      el('p', `Observed ${date(typeof quota.at === 'string' ? quota.at : null)}`),
+    );
+    if (quota.reached) item.append(el('p', String(quota.reached), 'notice warning'));
+    snapshots.append(item);
+  }
+  if (!report.quotas.length)
+    snapshots.append(
+      emptyState(
+        'No quota snapshot recorded',
+        'Missing information does not mean your allowance is unused.',
+      ),
+    );
+  const workload = panel(
+    'Your recorded usage',
+    'Local workload for the selected period, account, and model.',
+  );
+  const values = el('div', '', 'workload-list');
+  values.append(
+    datum('User turns', precise(report.statistics.tasks)),
+    datum('Model requests', precise(report.totals.requests)),
+    datum('Input + output tokens', precise(report.totals.processed)),
+    datum('API-equivalent estimate', estimate(report.totals)),
+    datum('Unpriced requests', precise(report.totals.unpricedRequests)),
+  );
+  if (report.statistics.subscriptionMultiple !== null)
+    values.append(
+      datum('Estimate / configured fee', `${report.statistics.subscriptionMultiple.toFixed(2)}x`),
+    );
+  workload.append(
+    values,
+    el(
+      'p',
+      'Last five hours is a local lookback. A quota snapshot has its own window and reset time. API estimates are not subscription charges.',
+      'note comparison-note',
+    ),
+  );
+  grid.append(snapshots, workload);
+  return grid;
+}
+/** @param {CodexReport} report */
+function render(report) {
+  current = report;
+  taskIndex = new Map(report.tasks.map((task) => [`${task.thread}:${task.turn}`, task]));
   if (view === 'settings') return;
-  const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  const focusKey = focused && content.contains(focused) ? focused.dataset.focusKey : undefined;
+  const content = byId('content');
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const focusKey = active && content.contains(active) ? active.dataset.focusKey : undefined;
   content.replaceChildren();
-  const t = r.totals;
-  const periodName = select('period').selectedOptions[0]?.textContent || r.period.label;
-  byId('period-info').textContent =
-    `${periodName} / ${r.period.from ? date(r.period.from, r.period.timezone) : 'Earliest recorded usage'} to ${r.period.to ? date(r.period.to, r.period.timezone) : 'now'} / ${r.period.timezone}`;
-  byId('freshness').textContent = `Updated ${date(r.generatedAt)} / revision ${r.revision}`;
-  const latest = r.tasks[0],
-    failure = byId('failure');
+  const period = byId('period-info');
+  const scopeLabel =
+    report.period.label === 'lifetime'
+      ? 'Recorded lifetime'
+      : report.period.label.charAt(0).toUpperCase() + report.period.label.slice(1);
+  period.replaceChildren(
+    el(
+      'span',
+      `${scopeLabel} / ${report.account === 'all' ? 'All recorded accounts' : report.account}`,
+      'period-range',
+    ),
+    el(
+      'span',
+      `${report.period.from ? date(report.period.from, report.period.timezone) : 'Earliest recorded usage'} to ${report.period.to ? date(report.period.to, report.period.timezone) : 'now'} (${report.period.timezone})`,
+    ),
+  );
+  byId('freshness').textContent = `Last updated ${date(report.generatedAt)}`;
+  const failure = byId('failure');
+  const latest = report.tasks[0];
   failure.classList.toggle('hidden', !latest || latest.status !== 'failed');
-  failure.textContent =
-    latest?.status === 'failed'
-      ? `Latest turn: ${latest.displayOutcome.label}. ${latest.error || 'Unspecified error'}. Observed usage has been retained.`
-      : '';
+  failure.replaceChildren();
+  if (latest?.status === 'failed')
+    failure.append(
+      el('strong', `Latest turn: ${latest.displayOutcome.label}`),
+      el('p', 'Recorded usage is retained. Open the session for its breakdown and failure reason.'),
+    );
+  const totals = report.totals;
   if (view === 'overview') {
-    const cards = el('section', '', 'metric-strip');
-    cards.setAttribute('aria-label', 'Selected period totals');
-    cards.append(
+    const metrics = el('section', '', 'metric-strip');
+    metrics.setAttribute('aria-label', 'Selected period totals');
+    metrics.append(
       card(
         'API-equivalent estimate',
-        estimate(t),
-        t.unpricedRequests
-          ? `${precise(t.unpricedRequests)} requests unpriced / partial`
-          : t.requests
-            ? 'All observed requests priced'
-            : 'No priced requests recorded',
+        estimate(totals),
+        totals.unpricedRequests
+          ? `${precise(totals.unpricedRequests)} requests still unpriced`
+          : totals.requests
+            ? 'All recorded requests priced'
+            : 'No usage in this selection',
         true,
       ),
       card(
         'Input tokens',
-        number(t.input),
-        t.cachePercent === null
+        number(totals.input),
+        totals.cachePercent === null
           ? 'No input recorded'
-          : `${t.cachePercent.toFixed(1)}% served from cache`,
+          : `${totals.cachePercent.toFixed(1)}% cached input`,
       ),
-      card('Output tokens', number(t.output), `${number(t.reasoning)} reasoning / included`),
+      card(
+        'Output tokens',
+        number(totals.output),
+        `${number(totals.reasoning)} reasoning, included`,
+      ),
       card(
         'User turns',
-        precise(r.statistics.tasks),
-        `${precise(r.sessions.length)} sessions / ${precise(t.requests)} requests`,
+        precise(report.statistics.tasks),
+        `${precise(report.sessions.length)} sessions / ${precise(totals.requests)} model requests`,
       ),
     );
-    content.append(cards);
-    const grid = el('div', '', 'grid-two');
-    grid.append(activityView(r), modelView(r));
-    content.append(grid);
+    content.append(metrics, activityView(report));
     const recent = el('section', '', 'panel');
-    const head = el('div', '', 'list-heading');
+    const heading = el('div', '', 'list-heading');
     const title = el('div');
     title.append(
-      el('h2', 'Latest turns'),
-      el('p', 'Each turn belongs to a session. Expand for its complete breakdown.', 'description'),
+      el('h2', 'Recent sessions'),
+      el('p', 'Open a conversation to explore its turns.', 'description'),
     );
-    head.append(title, viewLink('View sessions', 'sessions'));
-    recent.append(head);
-    for (const task of r.tasks.slice(0, 5)) recent.append(taskView(task, true));
-    if (!r.tasks.length)
+    heading.append(title, viewLink('View all sessions', 'sessions'));
+    recent.append(heading);
+    for (const session of report.sessions.slice(0, 3)) recent.append(sessionView(session));
+    if (!report.sessions.length)
       recent.append(
         emptyState(
-          'Your next session starts here',
-          'Run Codex with the collector open, or use codex-report sync to import retained history.',
+          'No sessions in this selection',
+          'Keep the collector running while using Codex, or import retained history with codex-report sync.',
         ),
       );
-    const outcomes = el('div', '', 'outcome-list');
-    for (const [count, label] of [
-      [r.statistics.completed, 'completed'],
-      [r.statistics.interrupted, 'interrupted'],
-      [r.statistics.usageExceeded, 'usage exceeded'],
-      [r.statistics.otherFailed, 'other failures'],
-    ]) {
-      const item = el('span', String(label));
-      item.prepend(el('strong', String(count)));
-      outcomes.append(item);
-    }
-    recent.append(outcomes);
     content.append(recent);
   } else if (view === 'sessions') {
     const query = sessionQuery.trim().toLocaleLowerCase();
-    const rows = r.sessions.filter((s) =>
-      [s.id, s.name || '', date(s.started)].some((v) => v.toLocaleLowerCase().includes(query)),
+    const sessions = report.sessions.filter((session) =>
+      [session.id, session.name || '', date(session.started)].some((text) =>
+        text.toLocaleLowerCase().includes(query),
+      ),
     );
-    const perPage = settingsState?.values.dashboard.sessionsPerPage || 20;
-    const pages = Math.max(1, Math.ceil(rows.length / perPage));
+    const pageSize = settingsState?.values.dashboard.sessionsPerPage || 20;
+    const pages = Math.max(1, Math.ceil(sessions.length / pageSize));
     sessionPage = Math.min(sessionPage, pages - 1);
     button('sessions-prev').disabled = sessionPage === 0;
     button('sessions-next').disabled = sessionPage >= pages - 1;
     byId('sessions-count').textContent =
-      `${rows.length} sessions / Page ${sessionPage + 1} of ${pages}`;
-    const p = panel(
-      'Session history',
-      `${r.sessions.length} sessions / ${r.tasks.length} root turns in this selection. Open a session to explore its turns and linked agents.`,
+      `${sessions.length} sessions / Page ${sessionPage + 1} of ${pages}`;
+    const list = panel(
+      'Your conversations',
+      `${report.tasks.length} root turns in the selected period. Session totals include linked agent work.`,
     );
-    p.classList.add('sessions-panel');
-    for (const session of rows.slice(sessionPage * perPage, (sessionPage + 1) * perPage))
-      p.append(sessionView(session));
-    if (!rows.length)
-      p.append(
+    list.classList.add('sessions-panel');
+    for (const session of sessions.slice(sessionPage * pageSize, (sessionPage + 1) * pageSize))
+      list.append(sessionView(session));
+    if (!sessions.length)
+      list.append(
         emptyState(
           query ? 'No matching sessions' : 'No sessions in this period',
           query
-            ? 'Try a different name, session ID, or start date.'
-            : 'Choose Recorded lifetime, or run codex-report sync to import retained history.',
+            ? 'Try another name, date, or session ID.'
+            : 'Choose Recorded lifetime or import retained history.',
         ),
       );
-    content.append(p);
-  } else if (view === 'limits') {
-    const grid = el('div', '', 'grid-two');
-    const quota = panel(
-      'Provider-reported limits',
-      'Latest snapshots retained in local records, independent of the selected report period. Not a live account API.',
-    );
-    for (const q of r.quotas) {
-      const block = el('div', '', 'quota');
-      const minutes = Number(q.minutes);
-      const window =
-        Number.isFinite(minutes) && minutes > 0
-          ? minutes >= 1440 && minutes % 1440 === 0
-            ? `${minutes / 1440}-day window`
-            : `${minutes / 60}-hour window`
-          : String(q.window || 'Unknown window');
-      const head = el('div', '', 'quota-head');
-      const title = el('div');
-      title.append(el('h3', String(q.limitId ?? 'Unknown limit')), el('p', window, 'note'));
-      head.append(
-        title,
-        el('span', typeof q.used === 'number' ? `${q.used}%` : 'Unknown', 'percent'),
-      );
-      block.append(head);
-      if (typeof q.used === 'number')
-        block.append(bar('Recorded allowance used', q.used, 100, 'of window'));
-      block.append(
-        el('p', `Observed ${date(typeof q.at === 'string' ? q.at : null)}`),
-        el('p', `Reset ${date(typeof q.resets === 'string' ? q.resets : null)}`),
-      );
-      if (q.reached) block.append(el('p', String(q.reached), 'notice'));
-      quota.append(block);
-    }
-    if (!r.quotas.length)
-      quota.append(
-        emptyState(
-          'No limit snapshot yet',
-          'Missing does not mean unused. Snapshots appear when Codex records provider quota information.',
-        ),
-      );
-    const comparison = panel(
-      'Your recorded workload',
-      'Local measurements for the selected account, model, and period.',
-    );
-    const list = el('div', '', 'workload-list');
-    list.append(
-      datum('User turns', precise(r.statistics.tasks)),
-      datum('Model requests', precise(t.requests)),
-      datum('Input + output tokens', precise(t.processed)),
-      datum('API-equivalent estimate', estimate(t)),
-      datum('Unpriced requests', precise(t.unpricedRequests)),
-    );
-    if (r.statistics.subscriptionMultiple !== null)
-      list.append(
-        datum(
-          'API-equivalent / configured fee',
-          `${r.statistics.subscriptionMultiple.toFixed(2)}x`,
-        ),
-      );
-    comparison.append(
-      list,
-      el(
-        'p',
-        'Last five hours is a local lookback. Provider snapshots retain their own window duration and reset. API-equivalent cost is an estimate, not a subscription charge.',
-        'note comparison-note',
-      ),
-    );
-    grid.append(quota, comparison);
-    content.append(grid);
-  } else content.append(healthView(r));
+    content.append(list);
+  } else if (view === 'limits') content.append(comparisonView(report));
+  else content.append(healthView(report));
   if (focusKey) {
     const replacement = Array.from(content.querySelectorAll('[data-focus-key]')).find(
-      (n) => n instanceof HTMLElement && n.dataset.focusKey === focusKey,
+      (node) => node instanceof HTMLElement && node.dataset.focusKey === focusKey,
     );
     if (replacement instanceof HTMLElement) replacement.focus({ preventScroll: true });
   }
@@ -927,6 +890,8 @@ async function refresh(force = false) {
     if (force) refreshRequested = true;
     return;
   }
+  // Background collection must not interrupt selecting/copying values or naming.
+  if (!force && (renameDialog.open || window.getSelection()?.type === 'Range')) return;
   loading = true;
   if (force) {
     button('refresh').disabled = true;
@@ -946,7 +911,7 @@ async function refresh(force = false) {
     }
     const account = select('account');
     for (const name of status.accounts) {
-      if (!Array.from(account.options).some((o) => o.value === name)) {
+      if (!Array.from(account.options).some((option) => option.value === name)) {
         const option = document.createElement('option');
         option.value = name;
         option.textContent = name;
@@ -957,7 +922,7 @@ async function refresh(force = false) {
       const params = new URLSearchParams({ scope: select('period').value, account: account.value });
       const model = select('model').value;
       if (model) params.set('model', model);
-      const r = /** @type {CodexReport} */ (await get('/api/report?' + params));
+      const report = /** @type {CodexReport} */ (await get('/api/report?' + params));
       if (
         select('period').value !== params.get('scope') ||
         select('account').value !== params.get('account') ||
@@ -967,16 +932,16 @@ async function refresh(force = false) {
         return;
       }
       button('download').disabled = false;
-      if (view !== 'settings') render(r);
-      else current = r;
-      revision = r.revision;
+      if (view !== 'settings') render(report);
+      else current = report;
+      revision = report.revision;
       lastRefresh = Date.now();
-      for (const m of r.models) {
+      for (const model of report.models) {
         const models = select('model');
-        if (!Array.from(models.options).some((o) => o.value === m.name)) {
+        if (!Array.from(models.options).some((option) => option.value === model.name)) {
           const option = document.createElement('option');
-          option.value = m.name;
-          option.textContent = m.name;
+          option.value = model.name;
+          option.textContent = model.name;
           models.append(option);
         }
       }
@@ -987,8 +952,10 @@ async function refresh(force = false) {
   } catch (error) {
     byId('connection').textContent = 'Collector unavailable';
     byId('connection').classList.add('offline');
-    byId('error').textContent = error instanceof Error ? error.message : String(error);
-    byId('error').classList.remove('hidden');
+    showError(
+      (error instanceof Error ? error.message : String(error)) +
+        ' Last loaded data is retained; use Refresh to retry.',
+    );
   } finally {
     loading = false;
     button('refresh').disabled = false;
@@ -1072,9 +1039,12 @@ function settingsView() {
   const content = byId('content');
   const form = document.createElement('form');
   form.id = 'settings-form';
+  // Validate the first invalid field explicitly so hidden tabs cannot compete
+  // for native focus. Browser constraints still provide the validation rules.
+  form.noValidate = true;
   const appearance = panel(
-    'Appearance & defaults',
-    'Preferences are saved for this installation. Default page and filters are used when you reopen the dashboard.',
+    'Appearance',
+    'Choose a theme and the page you start on. Preferences are saved on this computer.',
   );
   const fields = el('div', '', 'form-grid');
   selectField(
@@ -1155,8 +1125,8 @@ function settingsView() {
   );
   appearance.append(fields);
   const reporting = panel(
-    'Reporting',
-    'Changes apply to future receipts and report boundaries. Stored tokens and applied prices are not modified.',
+    'Reporting defaults',
+    'Set your initial filters, timezone, and terminal detail. Recorded usage and prices stay unchanged.',
   );
   const rf = el('div', '', 'form-grid');
   const zone = inputField(rf, 'settings-timezone', 'Reporting timezone', state.timezone);
@@ -1176,8 +1146,8 @@ function settingsView() {
   );
   reporting.append(rf);
   const billing = panel(
-    'Billing & subscription comparison',
-    'Configure each account label separately. Labels do not change ownership of recorded usage. Select that account in report filters to view its billing cycle.',
+    'Billing cycle',
+    'Configure one account label at a time. Choose the same account in your report filters to use its cycle.',
   );
   const bf = el('div', '', 'form-grid');
   const billAccount = inputField(
@@ -1246,16 +1216,25 @@ function settingsView() {
   reload.id = 'settings-reload';
   reload.type = 'button';
   reload.className = 'secondary';
-  reload.textContent = 'Reload / discard edits';
+  reload.textContent = 'Discard changes';
   actions.append(save, reload);
   const status = el('p', '', 'settings-message');
   status.id = 'settings-message';
   status.setAttribute('role', 'status');
   const savebar = el('div', '', 'settings-savebar');
-  status.textContent = 'Changes are saved to this installation only.';
+  status.textContent = 'No unsaved changes.';
   savebar.append(status, actions);
   form.append(appearance, reporting, billing, savebar);
   content.replaceChildren(form);
+  for (const id of ['settings-period', 'settings-account', 'settings-model']) {
+    const field = byId(id).closest('label');
+    if (field) rf.prepend(field);
+  }
+  settingsTabs(form, [
+    ['appearance', 'Appearance', appearance],
+    ['reporting', 'Reporting', reporting],
+    ['billing', 'Billing', billing],
+  ]);
   fillBilling(billAccount.value);
   /** @param {Event} event */
   const mark = (event) => {
@@ -1267,6 +1246,7 @@ function settingsView() {
     )
       billingDirty = true;
     status.textContent = 'Unsaved changes';
+    status.dataset.state = 'dirty';
   };
   form.addEventListener('input', mark);
   form.addEventListener('change', mark);
@@ -1294,12 +1274,23 @@ function settingsView() {
         settingsView();
       })
       .catch((e) => {
+        status.dataset.state = 'error';
         status.textContent = e instanceof Error ? e.message : String(e);
       });
   });
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (settingsSaving) return;
+    const firstInvalid = Array.from(form.querySelectorAll('input,select')).find(
+      (control) =>
+        (control instanceof HTMLInputElement || control instanceof HTMLSelectElement) &&
+        !control.disabled &&
+        !control.checkValidity(),
+    );
+    if (firstInvalid instanceof HTMLInputElement || firstInvalid instanceof HTMLSelectElement) {
+      firstInvalid.reportValidity();
+      return;
+    }
     /** @param {string} id */
     const text = (id) => input(id).value.trim() || null;
     /** @param {string} id */
@@ -1334,10 +1325,14 @@ function settingsView() {
       (mode === 'local' &&
         (!text('billing-local') || !text('billing-fx') || !text('billing-currency')))
     ) {
+      button('settings-tab-billing').click();
+      status.dataset.state = 'error';
       status.textContent = 'Complete the fee fields, or choose Disabled.';
       return;
     }
     settingsSaving = true;
+    status.textContent = 'Saving settings...';
+    status.dataset.state = 'saving';
     save.disabled = true;
     reload.disabled = true;
     // Freeze controls so edits made while the request is in flight cannot be silently lost.
@@ -1349,11 +1344,13 @@ function settingsView() {
         settingsDraftRevision = saved.revision;
         settingsDirty = false;
         billingDirty = false;
+        status.dataset.state = saved.auditWarning ? 'error' : 'saved';
         status.textContent =
           saved.auditWarning ||
           'Saved. Theme and reporting settings apply now. Default page and filters apply when you reopen the dashboard.';
       })
       .catch((e) => {
+        status.dataset.state = 'error';
         status.textContent = e instanceof Error ? e.message : String(e);
       })
       .finally(() => {
@@ -1366,13 +1363,65 @@ function settingsView() {
       });
   });
 }
+/** @param {HTMLFormElement} form @param {[string,string,HTMLElement][]} sections */
+function settingsTabs(form, sections) {
+  const tabs = el('div', '', 'settings-tabs');
+  tabs.setAttribute('role', 'tablist');
+  tabs.setAttribute('aria-label', 'Settings sections');
+  /** @param {string} name @param {boolean} [focus] */
+  const activate = (name, focus = false) => {
+    settingsSection = name;
+    for (const [key, , section] of sections) {
+      const selected = key === name;
+      section.hidden = !selected;
+      const tab = button(`settings-tab-${key}`);
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected && focus) tab.focus();
+    }
+  };
+  for (const [key, title, section] of sections) {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.textContent = title;
+    tab.id = `settings-tab-${key}`;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', `settings-panel-${key}`);
+    section.id = `settings-panel-${key}`;
+    section.setAttribute('role', 'tabpanel');
+    section.setAttribute('aria-labelledby', tab.id);
+    tab.addEventListener('click', () => activate(key));
+    tab.addEventListener('keydown', (event) => {
+      const keys = sections.map(([id]) => id);
+      const index = keys.indexOf(key);
+      let next = index;
+      if (event.key === 'ArrowRight') next = (index + 1) % keys.length;
+      else if (event.key === 'ArrowLeft') next = (index + keys.length - 1) % keys.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = keys.length - 1;
+      else return;
+      event.preventDefault();
+      activate(keys[next], true);
+    });
+    tabs.append(tab);
+  }
+  form.prepend(tabs);
+  activate(sections.some(([key]) => key === settingsSection) ? settingsSection : 'appearance');
+  // Native validation can find a field on a different tab. Reveal it before
+  // the browser moves focus, instead of leaving an invalid hidden control.
+  form.addEventListener(
+    'invalid',
+    (event) => {
+      if (!(event.target instanceof HTMLElement)) return;
+      for (const [key, , section] of sections) if (section.contains(event.target)) activate(key);
+    },
+    true,
+  );
+}
 /** @param {string} next */
 async function navigate(next) {
   if (settingsSaving) return;
-  if (next === 'settings' && view === next && document.getElementById('settings-form')) {
-    closeNavigation(false);
-    return;
-  }
+  if (next === 'settings' && view === next && document.getElementById('settings-form')) return;
   if (
     view === 'settings' &&
     next !== view &&
@@ -1381,8 +1430,8 @@ async function navigate(next) {
   )
     return;
   settingsDirty = false;
+  const sequence = ++navigationSequence;
   view = next;
-  /** @type {Record<string, string>} */
   const names = {
     overview: 'Overview',
     sessions: 'Sessions',
@@ -1390,92 +1439,44 @@ async function navigate(next) {
     health: 'Data health',
     settings: 'Settings',
   };
-  closeNavigation(false);
-  byId('title').textContent = names[view] || 'Overview';
-  byId('title').tabIndex = -1;
   const subtitles = {
-    overview: 'The work behind every turn, in one place.',
-    sessions: 'Follow the conversation. Keep every turn in context.',
-    limits: 'Your recorded workload, beside provider observations.',
-    health: 'Know what is collected, priced, and still catching up.',
-    settings: 'Make this workspace work the way you do.',
+    overview: 'Understand your usage without losing the detail.',
+    sessions: 'Your conversations, with every turn in context.',
+    limits: 'Compare your recorded workload with observed quotas.',
+    health: 'Know what was collected and what still needs attention.',
+    settings: 'Choose how this workspace works for you.',
   };
+  byId('title').textContent = names[/** @type {keyof typeof names} */ (view)] || names.overview;
   byId('subtitle').textContent =
     subtitles[/** @type {keyof typeof subtitles} */ (view)] || subtitles.overview;
-  document.title = `${names[view] || 'Overview'} - Codex Report`;
-  for (const b of document.querySelectorAll('button[data-view]')) {
-    const active = b.getAttribute('data-view') === view;
-    b.classList.toggle('selected', active);
-    if (active) b.setAttribute('aria-current', 'page');
-    else b.removeAttribute('aria-current');
+  document.title = `${byId('title').textContent} - Codex Report`;
+  for (const node of document.querySelectorAll('button[data-view]')) {
+    const active = node.getAttribute('data-view') === view;
+    node.classList.toggle('selected', active);
+    if (active) node.setAttribute('aria-current', 'page');
+    else node.removeAttribute('aria-current');
   }
-  byId('filters').classList.toggle('hidden', view === 'settings');
+  for (const id of ['filters', 'period-info', 'report-actions'])
+    byId(id).classList.toggle('hidden', view === 'settings');
   byId('session-controls').classList.toggle('hidden', view !== 'sessions');
-  byId('period-info').classList.toggle('hidden', view === 'settings');
   byId('failure').classList.add('hidden');
   if (view === 'settings') {
-    byId('content').replaceChildren(el('p', 'Loading settings...', 'empty'));
+    byId('content').replaceChildren(
+      emptyState('Opening settings', 'Reading your saved preferences.'),
+    );
     try {
-      settingsState = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
-      if (view === 'settings') settingsView();
-    } catch (e) {
-      showError(e instanceof Error ? e.message : String(e));
+      const snapshot = /** @type {SettingsSnapshot} */ (await get('/api/settings'));
+      if (sequence === navigationSequence && view === 'settings') {
+        settingsState = snapshot;
+        settingsView();
+      }
+    } catch (error) {
+      if (sequence === navigationSequence)
+        showError(error instanceof Error ? error.message : String(error));
     }
   } else if (current) render(current);
 }
-
-/** @param {boolean} [restoreFocus] */
-function closeNavigation(restoreFocus = true) {
-  const wasOpen = document.body.classList.contains('nav-open');
-  document.body.classList.remove('nav-open');
-  byId('nav-scrim').hidden = true;
-  button('nav-toggle').setAttribute('aria-expanded', 'false');
-  byId('main').inert = false;
-  byId('navigation').removeAttribute('role');
-  byId('navigation').removeAttribute('aria-modal');
-  byId('navigation').removeAttribute('aria-label');
-  if (wasOpen && restoreFocus) button('nav-toggle').focus();
-}
-function setupNavigation() {
-  button('nav-toggle').addEventListener('click', () => {
-    document.body.classList.add('nav-open');
-    byId('nav-scrim').hidden = false;
-    button('nav-toggle').setAttribute('aria-expanded', 'true');
-    byId('main').inert = true;
-    const navigation = byId('navigation');
-    navigation.setAttribute('role', 'dialog');
-    navigation.setAttribute('aria-modal', 'true');
-    navigation.setAttribute('aria-label', 'Navigation');
-    const selected = navigation.querySelector('button[aria-current="page"]');
-    if (selected instanceof HTMLElement) selected.focus();
-  });
-  for (const id of ['nav-close', 'nav-scrim'])
-    button(id).addEventListener('click', () => closeNavigation());
-  document.addEventListener('keydown', (event) => {
-    if (!document.body.classList.contains('nav-open')) return;
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeNavigation();
-    } else if (event.key === 'Tab') {
-      const controls = Array.from(byId('navigation').querySelectorAll('button')).filter(
-        (n) => !n.disabled && n.getClientRects().length,
-      );
-      const first = controls[0],
-        last = controls[controls.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    }
-  });
-  window.matchMedia('(max-width: 700px)').addEventListener('change', () => closeNavigation(false));
-}
-
 async function boot() {
-  setupNavigation();
   button('download').disabled = true;
   const token = new URLSearchParams(location.hash.slice(1)).get('token');
   if (token) {
@@ -1501,13 +1502,7 @@ async function boot() {
   );
   for (const node of document.querySelectorAll('button[data-view]'))
     node.addEventListener('click', () => {
-      void navigate(node.getAttribute('data-view') || 'overview').then(() => {
-        if (
-          window.matchMedia('(max-width: 700px)').matches &&
-          !document.body.classList.contains('nav-open')
-        )
-          byId('title').focus({ preventScroll: true });
-      });
+      void navigate(node.getAttribute('data-view') || 'overview');
     });
   await navigate(settingsState.values.dashboard.defaultView);
   input('session-search').addEventListener('input', () => {
@@ -1526,14 +1521,21 @@ async function boot() {
   button('rename-cancel').addEventListener('click', () => {
     if (!renameSaving) renameDialog.close();
   });
-  renameDialog.addEventListener('cancel', (e) => {
-    if (renameSaving) e.preventDefault();
+  renameDialog.addEventListener('cancel', (event) => {
+    if (renameSaving) event.preventDefault();
   });
-  byId('rename-form').addEventListener('submit', (e) => {
-    e.preventDefault();
+  renameDialog.addEventListener('close', () => {
+    const trigger = Array.from(document.querySelectorAll('[data-focus-key]')).find(
+      (node) => node instanceof HTMLElement && node.dataset.focusKey === `rename-${renameThread}`,
+    );
+    if (trigger instanceof HTMLElement) trigger.focus({ preventScroll: true });
+  });
+  byId('rename-form').addEventListener('submit', (event) => {
+    event.preventDefault();
     if (renameSaving) return;
     renameSaving = true;
     button('rename-save').disabled = true;
+    input('session-name').disabled = true;
     void saveSettings(
       { sessionNames: { [renameThread]: input('session-name').value.trim() || null } },
       renameRevision,
@@ -1542,18 +1544,19 @@ async function boot() {
         renameDialog.close();
         await refresh(true);
       })
-      .catch((e) => {
-        byId('rename-error').textContent = e instanceof Error ? e.message : String(e);
+      .catch((error) => {
+        byId('rename-error').textContent = error instanceof Error ? error.message : String(error);
       })
       .finally(() => {
         renameSaving = false;
         button('rename-save').disabled = false;
+        input('session-name').disabled = false;
       });
   });
-  window.addEventListener('beforeunload', (e) => {
+  window.addEventListener('beforeunload', (event) => {
     if (settingsDirty) {
-      e.preventDefault();
-      e.returnValue = '';
+      event.preventDefault();
+      event.returnValue = '';
     }
   });
   for (const id of ['period', 'account', 'model'])
@@ -1561,35 +1564,24 @@ async function boot() {
       sessionPage = 0;
       void refresh(true);
     });
-  byId('refresh').addEventListener('click', () => {
+  button('refresh').addEventListener('click', () => {
     void refresh(true);
   });
-  byId('download').addEventListener('click', () => {
+  button('download').addEventListener('click', () => {
     if (!current) return;
     const url = URL.createObjectURL(
       new Blob([JSON.stringify(current, null, 2)], { type: 'application/json' }),
     );
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'codex-report.json';
-    a.click();
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'codex-report.json';
+    link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   await refresh(true);
   setInterval(() => {
     if (!document.hidden) void refresh();
   }, 2000);
-  let lastWidth = window.innerWidth;
-  /** @type {ReturnType<typeof setTimeout>|undefined} */
-  let resizeTimer;
-  window.addEventListener('resize', () => {
-    if (window.innerWidth === lastWidth) return;
-    lastWidth = window.innerWidth;
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      if (current && view !== 'settings') render(current);
-    }, 150);
-  });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) void refresh();
   });
@@ -1599,10 +1591,9 @@ void boot().catch((error) => {
   byId('connection').classList.add('offline');
   byId('content').replaceChildren(
     emptyState(
-      'Reconnect to your local workspace',
-      'Run codex-report start --open and use the newly opened dashboard address. No data has been changed.',
+      'Reconnect to your workspace',
+      'Run codex-report start --open and use the newly opened address. Your data has not changed.',
     ),
   );
-  byId('error').textContent = error instanceof Error ? error.message : String(error);
-  byId('error').classList.remove('hidden');
+  showError(error instanceof Error ? error.message : String(error));
 });
