@@ -4,6 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
 const { launchBrowser } = require('./browser-launch.cjs');
+const { auditSurface } = require('./ui-audit.cjs');
 const playwright = require(process.env.CODEX_REPORT_PLAYWRIGHT || 'playwright-core');
 const { initializeConfig, saveConfig } = require('../dist/config');
 const { Store } = require('../dist/database');
@@ -102,6 +103,21 @@ async function main() {
   browser = await launchBrowser(playwright);
   service = await startService(temp);
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+  async function visit(name) {
+    const target = page.locator(`button[data-view="${name}"]`);
+    if (await page.locator('#nav-toggle').isVisible()) {
+      if ((await page.locator('#nav-toggle').getAttribute('aria-expanded')) !== 'true')
+        await page.click('#nav-toggle');
+    }
+    await target.click();
+    await page.waitForFunction(
+      (name) =>
+        document.querySelector(`button[data-view="${name}"]`).getAttribute('aria-current') ===
+        'page',
+      name,
+    );
+  }
+  const audit = [];
   const errors = [],
     external = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -173,14 +189,38 @@ async function main() {
   );
   await page.selectOption('#period', 'lifetime');
   await page.waitForFunction(() => document.querySelectorAll('details.task').length > 0);
+  await page.waitForSelector('.activity-chart');
+  assert.equal(await page.locator('.activity-chart').getAttribute('role'), 'img');
+  assert.equal(
+    await page.locator('.activity-chart g[data-day]').count(),
+    Number(await page.locator('.activity-chart').getAttribute('data-days')),
+  );
+  await page.click('.chart-data > summary');
+  assert.ok(await page.locator('.chart-data table tbody tr').count());
+  await page.click('#refresh');
+  await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
+  assert.equal(await page.locator('.chart-data').getAttribute('open'), '');
+  await page.click('.chart-data > summary');
+
+  audit.push(await auditSurface(page, 'overview-dark'));
   const out = process.env.CODEX_REPORT_SCREENSHOTS;
   if (out) fs.mkdirSync(out, { recursive: true });
-  if (out) await page.screenshot({ path: path.join(out, 'dashboard-desktop.png'), fullPage: true });
-  await page.click('button[data-view="sessions"]');
+  if (out)
+    await page.screenshot({
+      animations: 'disabled',
+      path: path.join(out, 'dashboard-desktop.png'),
+      fullPage: true,
+    });
+  await visit('sessions');
   assert.equal(await page.locator('details.session').count(), 2);
+  audit.push(await auditSurface(page, 'sessions-dark'));
   await page.evaluate(() => window.scrollTo(0, 0));
   if (out)
-    await page.screenshot({ path: path.join(out, 'dashboard-sessions.png'), fullPage: true });
+    await page.screenshot({
+      animations: 'disabled',
+      path: path.join(out, 'dashboard-sessions.png'),
+      fullPage: true,
+    });
   const mainSession = page.locator('details.session[data-session="demo-thread"]');
   await mainSession.locator(':scope > summary').click();
   assert.equal(await mainSession.locator('details.task').count(), 12);
@@ -207,18 +247,36 @@ async function main() {
   assert.equal(await page.locator('details.session').count(), 1);
   await page.fill('#session-search', '');
   if (out)
-    await page.screenshot({ path: path.join(out, 'dashboard-sessions-dark.png'), fullPage: true });
+    await page.screenshot({
+      animations: 'disabled',
+      path: path.join(out, 'dashboard-sessions-dark.png'),
+      fullPage: true,
+    });
   await page.selectOption('#account', 'demo');
   await page.waitForTimeout(100);
   assert.equal(await page.inputValue('#account'), 'demo');
-  await page.click('button[data-view="limits"]');
+  await visit('limits');
   await page.waitForSelector('.quota');
   assert.ok((await page.textContent('#content')).includes('100%'));
-  if (out) await page.screenshot({ path: path.join(out, 'dashboard-limits.png'), fullPage: true });
-  await page.click('button[data-view="health"]');
+  if (out)
+    await page.screenshot({
+      animations: 'disabled',
+      path: path.join(out, 'dashboard-limits.png'),
+      fullPage: true,
+    });
+  audit.push(await auditSurface(page, 'comparison-dark'));
+  await visit('health');
   assert.ok((await page.textContent('#content')).includes('Source status'));
-  await page.click('button[data-view="settings"]');
+  audit.push(await auditSurface(page, 'health-dark'));
+  if (out)
+    await page.screenshot({
+      animations: 'disabled',
+      path: path.join(out, 'dashboard-health.png'),
+      fullPage: true,
+    });
+  await visit('settings');
   await page.waitForSelector('#settings-form');
+  audit.push(await auditSurface(page, 'settings-dark'));
   await page.selectOption('#settings-theme', 'light');
   await page.selectOption('#settings-view', 'sessions');
   await page.selectOption('#settings-period', '5h');
@@ -230,7 +288,7 @@ async function main() {
   await page.selectOption('#billing-fee-mode', 'usd');
   await page.fill('#billing-usd', '120');
   await page.waitForTimeout(2200);
-  await page.click('button[data-view="settings"]');
+  await visit('settings');
   assert.equal(await page.inputValue('#billing-day'), '31', 'live refresh does not erase edits');
   assert.equal(await page.inputValue('#settings-theme'), 'light');
   await page.click('#settings-save');
@@ -240,7 +298,11 @@ async function main() {
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
   await page.evaluate(() => window.scrollTo(0, 0));
   if (out)
-    await page.screenshot({ path: path.join(out, 'dashboard-settings-light.png'), fullPage: true });
+    await page.screenshot({
+      animations: 'disabled',
+      path: path.join(out, 'dashboard-settings-light.png'),
+      fullPage: true,
+    });
   await page.selectOption('#settings-theme', 'system');
   await page.click('#settings-save');
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'system');
@@ -257,27 +319,39 @@ async function main() {
   await page.selectOption('#settings-theme', 'light');
   await page.click('#settings-save');
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+  audit.push(await auditSurface(page, 'settings-light'));
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     true,
     'settings mobile fit',
   );
+  audit.push(await auditSurface(page, 'settings-mobile'));
   if (out)
     await page.screenshot({
+      animations: 'disabled',
       path: path.join(out, 'dashboard-settings-mobile.png'),
       fullPage: true,
     });
-  await page.click('button[data-view="sessions"]');
+  await visit('sessions');
   await page.evaluate(() => window.scrollTo(0, 0));
+  await page.click('#nav-toggle');
+  assert.equal(await page.locator('#main').getAttribute('inert'), '');
   assert.ok(
     await page
       .locator('button[data-view="settings"]')
       .evaluate((n) => n.getBoundingClientRect().right <= window.innerWidth),
-    'Settings navigation visible on mobile',
+    'Settings navigation accessible in the mobile drawer',
+  );
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#nav-toggle').getAttribute('aria-expanded'), 'false');
+  assert.equal(
+    await page.locator('#nav-toggle').evaluate((n) => n === document.activeElement),
+    true,
   );
   if (out)
     await page.screenshot({
+      animations: 'disabled',
       path: path.join(out, 'dashboard-sessions-mobile.png'),
       fullPage: true,
     });
@@ -286,14 +360,31 @@ async function main() {
     true,
     'sessions mobile fit',
   );
-  await page.click('button[data-view="overview"]');
+  audit.push(await auditSurface(page, 'sessions-mobile'));
+  await visit('overview');
   await page.setViewportSize({ width: 390, height: 844 });
-  if (out) await page.screenshot({ path: path.join(out, 'dashboard-mobile.png'), fullPage: true });
+  if (out)
+    await page.screenshot({
+      animations: 'disabled',
+      path: path.join(out, 'dashboard-mobile.png'),
+      fullPage: true,
+    });
   assert.equal(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     true,
     'No page overflow on mobile',
   );
+  audit.push(await auditSurface(page, 'overview-mobile'));
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.waitForTimeout(200);
+  audit.push(await auditSurface(page, 'overview-320px'));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.click('#nav-toggle');
+  assert.equal(
+    await page.locator('#navigation').evaluate((n) => getComputedStyle(n).transitionDuration),
+    '0s',
+  );
+  await page.keyboard.press('Escape');
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
   console.log(
@@ -308,8 +399,12 @@ async function main() {
         playwright: require(
           path.join(process.env.CODEX_REPORT_PLAYWRIGHT || 'playwright-core', 'package.json'),
         ).version,
+        audit,
         checks: [
           'real collector snapshot',
+          'recorded-day chart with exact values and preserved table expansion',
+          'mobile drawer, keyboard Escape and focus restoration',
+          'text contrast, 44px controls and reduced motion',
           'dashboard boot',
           'two grouped sessions / thirteen turns',
           'usage-exceeded display status',
