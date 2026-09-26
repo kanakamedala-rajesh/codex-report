@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-25T12:54:00.822349+00:00",
+  "title": "Design System: Codex Report",
+  "extensions": {
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Page title",
+        "purpose": "The current workspace page, not a marketing headline."
+      },
+      "label": {
+        "displayName": "Supporting detail",
+        "purpose": "Metadata, labels and descriptions follow the global root scale."
+      }
+    },
+    "shadows": [
+      {
+        "name": "dialog-dark",
+        "value": "0 1.5rem 4rem rgb(0 0 0 / 34%)",
+        "purpose": "Native modal dialogs only."
+      },
+      {
+        "name": "dialog-light",
+        "value": "0 1.5rem 4rem rgb(31 46 75 / 15%)",
+        "purpose": "Native modal dialogs in Light mode."
+      }
+    ],
+    "motion": [
+      {
+        "name": "route-state",
+        "value": "160ms ease-out",
+        "purpose": "Short visible route entrance; disabled for reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "workspace-wide",
+        "value": "68rem"
+      },
+      {
+        "name": "workspace-medium",
+        "value": "57rem"
+      },
+      {
+        "name": "workspace-narrow",
+        "value": "40rem"
+      },
+      {
+        "name": "inspector-narrow",
+        "value": "37rem"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Save settings or export the selected report.",
+      "html": "<button class=\"ds-primary\">Save settings</button>",
+      "css": ".ds-primary{font:inherit;padding:.6rem 1rem;border:1px solid var(--primary);border-radius:.55rem;background:var(--primary);color:var(--primary-ink);min-height:44px}.ds-primary:hover{background:var(--primary-hover)}.ds-primary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}"
+    },
+    {
+      "name": "Secondary action",
+      "kind": "button",
+      "description": "Refresh, rename or discard without implying a primary action.",
+      "html": "<button class=\"ds-secondary\">Refresh</button>",
+      "css": ".ds-secondary{font:inherit;padding:.6rem 1rem;border:1px solid var(--line-strong);border-radius:.55rem;background:var(--surface);color:var(--ink);min-height:44px}.ds-secondary:hover{background:var(--raised);border-color:var(--accent)}.ds-secondary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}"
+    },
+    {
+      "name": "Search field",
+      "kind": "input",
+      "description": "Named native input, with inherited sizing.",
+      "html": "<label class=\"ds-field\">Search sessions<input placeholder=\"Name, date, or session ID\"></label>",
+      "css": ".ds-field{font:inherit;color:var(--muted)}.ds-field input{display:block;font:inherit;margin-top:.4rem;padding:.7rem .9rem;border:1px solid var(--line-strong);border-radius:.55rem;background:var(--field);color:var(--ink)}.ds-field input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Selected session",
+      "kind": "custom",
+      "description": "An explicit selection beside its persistent inspector.",
+      "html": "<button class=\"ds-session\" aria-pressed=\"true\">Dashboard exploration</button>",
+      "css": ".ds-session{font:inherit;text-align:left;padding:1rem;border:1px solid var(--accent);border-radius:.55rem;color:var(--ink);background:var(--accent-wash)}.ds-session:hover{background:var(--raised)}.ds-session:focus-visible{outline:3px solid var(--accent);outline-offset:3px}"
+    },
+    {
+      "name": "Usage exceeded",
+      "kind": "chip",
+      "description": "A labelled recorded outcome, not inferred entitlement.",
+      "html": "<span class=\"ds-outcome\">Usage exceeded</span>",
+      "css": ".ds-outcome{font:inherit;font-size:.94117647rem;padding:.28rem .6rem;border-radius:.35rem;color:var(--warning);background:var(--warning-wash)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Activity Workstation",
+    "overview": "A desktop tool for reading recorded work and inspecting conversations without losing context.",
+    "keyCharacteristics": [
+      "Horizontal workspace navigation",
+      "Adjacent session inspector",
+      "Shared global type scale",
+      "Keyboard command search"
+    ],
+    "rules": [
+      {
+        "name": "The One Scale Rule",
+        "body": "Reflow containers instead of shrinking component text at breakpoints.",
+        "section": "typography"
+      },
+      {
+        "name": "The Recorded Evidence Rule",
+        "body": "Qualify partial estimates where they are displayed.",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "Preserve accounting and settings revision protection.",
+      "Use semantic tokens and the shared root scale."
+    ],
+    "donts": [
+      "Do not invent zero-dollar usage or quota entitlements.",
+      "Do not add remote fonts or telemetry."
+    ]
+  }
+}

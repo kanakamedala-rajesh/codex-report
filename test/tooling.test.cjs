@@ -19,7 +19,7 @@ function fakeNpm(root, name = 'npm') {
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name }));
   const file = path.join(dir, 'bin', 'npm-cli.js');
   fs.writeFileSync(file, 'throw new Error("This resolution fixture must not be executed.");');
-  return file;
+  return fs.realpathSync(file);
 }
 
 test('npm resolver accepts a verified npm_execpath', (t) => {
@@ -46,6 +46,17 @@ test('npm resolver handles the POSIX lib/node_modules distribution layout', (t) 
   const root = temporary(t);
   const npm = fakeNpm(path.join(root, 'lib'));
   assert.equal(resolveNpmCli({}, path.join(root, 'bin', 'node')), npm);
+});
+test('npm resolver canonicalizes linked prefixes without executing a shell', (t) => {
+  const root = temporary(t);
+  const prefix = path.join(root, 'actual');
+  const npm = fakeNpm(prefix);
+  const alias = path.join(root, 'linked');
+  fs.symlinkSync(prefix, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(
+    resolveNpmCli({ npm_execpath: path.join(alias, 'node_modules/npm/bin/npm-cli.js') }),
+    npm,
+  );
 });
 test('npm resolver rejects a foreign package even when the filename is npm-cli.js', (t) => {
   const root = temporary(t);

@@ -245,5 +245,7 @@ test('atomic output preserves a complete replacement', (t) => {
   atomicWrite(p, 'new');
   assert.equal(fs.readFileSync(p, 'utf8'), 'new');
   assert.equal(within(p, [h]), true);
-  assert.equal(within('/etc/passwd', [h]), false);
+  const outside = path.join(temp(t), 'outside.txt');
+  fs.writeFileSync(outside, 'outside the allowed root');
+  assert.equal(within(outside, [h]), false);
 });

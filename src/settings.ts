@@ -98,7 +98,14 @@ export function settingsUpdate(config: Config, input: unknown): Config {
     if (key in changes) Object.assign(next, { [key]: changes[key] });
   if ('dashboard' in changes) {
     const d = strictObject(changes.dashboard, 'dashboard');
-    keysOnly(d, ['theme', 'defaultView', 'defaultPeriod', 'defaultModel', 'sessionsPerPage']);
+    keysOnly(d, [
+      'theme',
+      'fontSize',
+      'defaultView',
+      'defaultPeriod',
+      'defaultModel',
+      'sessionsPerPage',
+    ]);
     next.dashboard = { ...dashboardPreferences(config), ...d } as DashboardPreferences;
   }
   if ('accounts' in changes) {

@@ -18,6 +18,7 @@ const {
 } = require('../dist/settings');
 const { Store } = require('../dist/database');
 const { startService, rpc } = require('../dist/service');
+const { sampleSnapshot } = require('./helpers/sample-snapshot.cjs');
 function init(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-report-settings-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -285,7 +286,7 @@ test('live preferences and fee changes preserve recorded tokens, prices, and own
     tools: [],
     samples: [sample],
   });
-  const before = store.db.prepare('SELECT * FROM samples WHERE id=?').get('n:keep');
+  const before = sampleSnapshot(store.db, 'n:keep');
   store.close();
   const service = await startService(home);
   try {
@@ -300,7 +301,7 @@ test('live preferences and fee changes preserve recorded tokens, prices, and own
     });
     const read = new Store(home, true);
     try {
-      assert.deepEqual(read.db.prepare('SELECT * FROM samples WHERE id=?').get('n:keep'), before);
+      assert.deepEqual(sampleSnapshot(read.db, 'n:keep'), before);
     } finally {
       read.close();
     }

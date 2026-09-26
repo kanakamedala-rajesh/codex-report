@@ -5,14 +5,17 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { spawnSync, spawn } = require('node:child_process');
 const { packProject, runNpm } = require('./npm-tools.cjs');
+const { checkedOutput, readShimVersion } = require('./installed-shim.cjs');
 const { name: packageName, version: expectedVersion } = require('../package.json');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-report-packed-'));
 let service;
 function run(args, options = {}) {
-  const r = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 60000, ...options });
-  if (r.error) throw r.error;
-  if (r.status !== 0) throw new Error(`Command failed (${r.status}): ${r.stderr}\n${r.stdout}`);
-  return r.stdout;
+  const r = spawnSync(process.execPath, args, {
+    encoding: 'utf8',
+    timeout: 60000,
+    ...options,
+  });
+  return checkedOutput(r, `Packed CLI ${args[3] || args[0]}`, options.timeout || 60000);
 }
 const pause = (n) => new Promise((r) => setTimeout(r, n));
 async function main() {
@@ -53,21 +56,7 @@ async function main() {
     prefix,
     process.platform === 'win32' ? 'codex-report.cmd' : 'bin/codex-report',
   );
-  let version;
-  if (process.platform === 'win32') {
-    const text = `& '${shim.replace(/'/g, "''")}' --version; exit $LASTEXITCODE`;
-    const r = spawnSync(
-      'powershell.exe',
-      ['-NoProfile', '-EncodedCommand', Buffer.from(text, 'utf16le').toString('base64')],
-      { encoding: 'utf8', timeout: 10000 },
-    );
-    assert.equal(r.status, 0, r.stderr);
-    version = r.stdout;
-  } else {
-    const r = spawnSync(shim, ['--version'], { encoding: 'utf8', timeout: 10000 });
-    assert.equal(r.status, 0, r.stderr);
-    version = r.stdout;
-  }
+  const version = readShimVersion(shim);
   assert.equal(version.trim(), expectedVersion);
   command(['init', '--codex-home', codex]);
   command(['init', '--codex-home', codex]);

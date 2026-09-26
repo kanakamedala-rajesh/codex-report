@@ -20,6 +20,8 @@ export interface Source {
 }
 export interface DashboardPreferences {
   theme: 'dark' | 'light' | 'system';
+  /** Nominal base size; optional so pre-existing configurations remain valid. */
+  fontSize?: number;
   defaultView: 'overview' | 'sessions' | 'limits' | 'health';
   defaultPeriod: 'cycle' | '5h' | 'day' | 'week' | 'lifetime';
   defaultModel: string;
@@ -27,6 +29,7 @@ export interface DashboardPreferences {
 }
 export const DASHBOARD_DEFAULTS: DashboardPreferences = {
   theme: 'dark',
+  fontSize: 17,
   defaultView: 'overview',
   defaultPeriod: 'cycle',
   defaultModel: '',
@@ -124,6 +127,14 @@ export function validateConfig(input: unknown): Config {
   }
   if (c.dashboard !== undefined) {
     const d = object(c.dashboard);
+    if (
+      d.fontSize !== undefined &&
+      (typeof d.fontSize !== 'number' ||
+        !Number.isInteger(d.fontSize) ||
+        d.fontSize < 14 ||
+        d.fontSize > 24)
+    )
+      throw new Error('Dashboard font size must be a whole number from 14 to 24.');
     if (
       typeof d.theme !== 'string' ||
       !['dark', 'light', 'system'].includes(d.theme) ||

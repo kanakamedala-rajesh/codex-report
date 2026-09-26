@@ -1,0 +1,89 @@
+{
+  "status": "PASS",
+  "mode": "offline DOM fixtures with real collector snapshot",
+  "browser": "144.0.7559.96",
+  "playwright": "1.57.0-beta-1764944708000",
+  "audit": [
+    {
+      "surface": "overview-dark",
+      "viewport": 1440,
+      "theme": "dark",
+      "checkedText": 80
+    },
+    {
+      "surface": "sessions-dark",
+      "viewport": 1440,
+      "theme": "dark",
+      "checkedText": 31
+    },
+    {
+      "surface": "comparison-dark",
+      "viewport": 1440,
+      "theme": "dark",
+      "checkedText": 38
+    },
+    {
+      "surface": "health-dark",
+      "viewport": 1440,
+      "theme": "dark",
+      "checkedText": 46
+    },
+    {
+      "surface": "settings-dark",
+      "viewport": 1440,
+      "theme": "dark",
+      "checkedText": 32
+    },
+    {
+      "surface": "settings-light",
+      "viewport": 1440,
+      "theme": "light",
+      "checkedText": 33
+    },
+    {
+      "surface": "settings-mobile",
+      "viewport": 390,
+      "theme": "light",
+      "checkedText": 27
+    },
+    {
+      "surface": "sessions-mobile",
+      "viewport": 390,
+      "theme": "light",
+      "checkedText": 89
+    },
+    {
+      "surface": "overview-mobile",
+      "viewport": 390,
+      "theme": "light",
+      "checkedText": 74
+    },
+    {
+      "surface": "overview-320px",
+      "viewport": 320,
+      "theme": "light",
+      "checkedText": 74
+    }
+  ],
+  "checks": [
+    "real collector snapshot",
+    "recorded-day chart with exact values and preserved table expansion",
+    "mobile drawer, keyboard Escape and focus restoration",
+    "text contrast, 44px controls and reduced motion",
+    "dashboard boot",
+    "two grouped sessions / thirteen turns",
+    "usage-exceeded display status",
+    "local session nickname with HTML treated as text",
+    "session search",
+    "settings save and dirty-form preservation",
+    "dark, light, and system theme behavior",
+    "mobile sessions and settings",
+    "expanded state retained",
+    "account filter",
+    "provider quota view",
+    "data health view",
+    "390px viewport without overflow",
+    "no page errors",
+    "no external requests"
+  ]
+}

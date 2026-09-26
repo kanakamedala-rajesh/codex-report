@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { Batch, Sample, Turn } from './types';
 import { privateDir, hash } from './util';
+import { isolatedDatabase } from './database-isolation';
 type Value = string | number | null;
 export interface Statement {
   run(...params: Value[]): unknown;
@@ -22,15 +23,21 @@ export function openDatabase(file: string, readonly = false): { db: Database; ba
     throw new Error('Expected an existing database file.');
   const req = createRequire(__filename);
   let Constructor: (new (p: string, o: object) => Database) | undefined;
+  let nativeModule: string | undefined;
   if (process.env.CODEX_REPORT_SQLITE_BACKEND !== 'builtin') {
     try {
-      Constructor = req('libsql') as typeof Constructor;
+      // The collector itself runs in a worker. Resolve only on Windows so the
+      // native addon is loaded exclusively inside its dedicated process.
+      if (process.platform === 'win32') nativeModule = req.resolve('libsql');
+      else Constructor = req('libsql') as typeof Constructor;
     } catch (error) {
       if (process.env.CODEX_REPORT_SQLITE_BACKEND === 'libsql') throw error;
     }
     // Opening an existing database must not silently fall back after a real database error.
-    if (Constructor) {
-      const db = new Constructor(file, { timeout: 1.5 });
+    if (Constructor || nativeModule) {
+      const db = nativeModule
+        ? isolatedDatabase({ file, module: nativeModule, readonly })
+        : new Constructor!(file, { timeout: 1500 });
       try {
         if (readonly) db.exec('PRAGMA query_only=ON;');
         return { db, backend: 'libsql 0.5.29' };
@@ -136,10 +143,11 @@ export class Store {
         this.db.prepare("INSERT OR IGNORE INTO meta VALUES('revision','0')").run();
       }
     } catch (e) {
-      try {
-        connection?.close();
-      } catch {}
-      this.lease?.close();
+      // Keep the reservation if native shutdown cannot be confirmed. A later
+      // process can recover a stale lease only after this process has exited.
+      connection?.close();
+      if ((e as NodeJS.ErrnoException).code !== 'CODEX_REPORT_DATABASE_SHUTDOWN_UNCONFIRMED')
+        this.lease?.close();
       throw e;
     }
   }
@@ -351,11 +359,8 @@ export class Store {
     if (process.platform !== 'win32') fs.chmodSync(destination, 0o600);
   }
   close(): void {
-    try {
-      this.db.close();
-    } finally {
-      this.lease?.close();
-      this.lease = null;
-    }
+    this.db.close();
+    this.lease?.close();
+    this.lease = null;
   }
 }

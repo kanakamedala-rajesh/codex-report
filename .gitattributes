@@ -1,0 +1,12 @@
+# Match Prettier and EditorConfig on every checkout, including Windows.
+* text=auto eol=lf
+
+# Never normalize the bundled native decoders or binary fixtures.
+runtime/zstd-* binary
+*.exe binary
+*.png binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.zst binary
+*.sqlite3 binary
